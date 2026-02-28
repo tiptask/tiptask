@@ -62,7 +62,7 @@ export default function RequestsPage() {
       const { data } = await supabase
         .from('task_requests').select('*, tasks(*)')
         .eq('creator_id', user.id)
-        .in('status', ['pending', 'accepted'])
+        .in('status', ['pending', 'accepted'])  // draft excluded intentionally
         .eq('session_id', sessionData?.id ?? '')
         .order('created_at', { ascending: true })
 
@@ -94,9 +94,11 @@ export default function RequestsPage() {
           filter: `creator_id=eq.${user.id}`,
         }, (payload) => {
           const req = payload.new as TaskRequest
+          // Ignore drafts — only show after webhook promotes to pending
+          if (req.status === 'draft') return
           if (req.status === 'accepted') {
             setAccepted(prev => [req, ...prev])
-          } else if (new Date(req.expires_at) > new Date() && (req.task_id || req.custom_task_text)) {
+          } else if (req.status === 'pending' && new Date(req.expires_at) > new Date() && (req.task_id || req.custom_task_text)) {
             setPending(prev => [...prev, req])
           }
         })
@@ -106,7 +108,22 @@ export default function RequestsPage() {
         }, (payload) => {
           const updated = payload.new as TaskRequest
 
-          // Remove from pending and accepted always
+          // Draft promoted to pending by webhook = new card to show
+          if (updated.status === 'pending') {
+            const alreadyInPending = true // check below
+            setPending(prev => {
+              const exists = prev.find(r => r.id === updated.id)
+              if (exists) return prev.map(r => r.id === updated.id ? { ...r, ...updated } : r)
+              // Was draft, now pending — add to list
+              if (new Date(updated.expires_at) > new Date() && (updated.task_id || updated.custom_task_text)) {
+                return [...prev, updated]
+              }
+              return prev
+            })
+            return
+          }
+
+          // Remove from pending and accepted for any other status change
           setPending(prev => prev.filter(r => r.id !== updated.id))
           setAccepted(prev => prev.filter(r => r.id !== updated.id))
 
@@ -203,10 +220,10 @@ export default function RequestsPage() {
     }
   }
 
-  async function extend(requestId: string, taskAmount: number) {
-    if (!creator) return
-    const extensionFee = Math.round(taskAmount * 0.10 * 100) / 100
-    if (!confirm(`Extend this task by 5 minutes?\n\nExtension fee: ${extensionFee} ${creator.currency?.toUpperCase() ?? 'RON'} (10% of task value) — kept by platform`)) return
+  async function confirmExtend() {
+    if (!creator || !extendConfirm) return
+    const requestId = extendConfirm.id
+    setExtendConfirm(null)
     setActing(requestId + 'extend')
     try {
       const res = await fetch('/api/payments/extend', {
@@ -216,10 +233,7 @@ export default function RequestsPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      // Update local expires_at
-      setAccepted(prev => prev.map(r =>
-        r.id === requestId ? { ...r, expires_at: data.new_expiry } : r
-      ))
+      setPending(prev => prev.map(r => r.id === requestId ? { ...r, expires_at: data.new_expiry } : r))
     } catch (err: any) {
       alert(err.message)
     } finally {
@@ -464,6 +478,19 @@ export default function RequestsPage() {
                           <span className="text-white/40 text-sm truncate">{req.requester_name}</span>
                         </div>
                         <p className="text-white/30 text-xs truncate mt-0.5">{getTaskLabel(req)}</p>
+                        {req.status === 'completed' && req.platform_fee != null && (
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <span className="text-green-400 text-xs font-semibold">
+                              You receive: {Math.round((req.amount - req.platform_fee) * 100) / 100} {req.currency}
+                            </span>
+                            <span className="text-white/20 text-xs">
+                              −{req.platform_fee} fee
+                              {req.extensions && req.extensions.length > 0 && (
+                                <> · {req.extensions.length}× extended</>
+                              )}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <span className={`text-xs font-bold px-3 py-1 rounded-full shrink-0 ${

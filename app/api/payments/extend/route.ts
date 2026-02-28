@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { stripe } from '@/lib/stripe'
 import { getSupabaseAdmin } from '@/lib/supabase'
 
 const EXTENSION_MINUTES = 5
@@ -24,6 +25,18 @@ export async function POST(req: NextRequest) {
 
     if (taskRequest.status !== 'pending')
       return NextResponse.json({ error: 'Can only extend pending requests' }, { status: 400 })
+
+    // Verify Stripe PI is still valid
+    const pi = await stripe.paymentIntents.retrieve(taskRequest.stripe_payment_intent_id)
+    if (pi.status !== 'requires_capture') {
+      // PI expired — cancel in our DB too
+      await supabase.from('task_requests')
+        .update({ status: 'declined' })
+        .eq('id', task_request_id)
+      return NextResponse.json({
+        error: 'Payment authorization has expired — the viewer must submit a new request'
+      }, { status: 400 })
+    }
 
     if (taskRequest.custom_task_text === null && taskRequest.task_id === null)
       return NextResponse.json({ error: 'Cannot extend free tips' }, { status: 400 })

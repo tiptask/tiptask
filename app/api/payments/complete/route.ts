@@ -20,8 +20,13 @@ export async function POST(req: NextRequest) {
       taskRequest.stripe_payment_intent_id
     )
 
-    // Capture task amount + estimated stripe fee (buffer not captured)
-    // Extension fees are deducted from creator payout (platform_fee already includes them)
+    // Verify PI is still capturable before attempting
+    if (paymentIntent.status !== 'requires_capture') {
+      return NextResponse.json({
+        error: `Payment authorization expired or invalid (status: ${paymentIntent.status}). The viewer's card hold has lapsed — you cannot charge this request.`
+      }, { status: 400 })
+    }
+
     const captureAmount = Math.round(
       (taskRequest.amount + (taskRequest.stripe_fee || 0)) * 100
     )

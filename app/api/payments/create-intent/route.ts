@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
         stripe_fee_buffer: fees.stripeFeeBuffer,
         total_charged: fees.totalAuthorized,
         payment_method: 'card',
-        status: is_free_tip ? 'accepted' : 'pending',
+        status: is_free_tip ? 'accepted' : 'draft',
         responded_at: is_free_tip ? new Date().toISOString() : null,
         stripe_payment_intent_id: paymentIntent.id,
         stripe_account_id: creator.stripe_account_id,

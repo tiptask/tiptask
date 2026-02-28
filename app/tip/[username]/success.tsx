@@ -15,8 +15,8 @@ type Props = {
 }
 
 export function SuccessScreen({ taskRequestId, creatorName, taskLabel, amount, currency, isTip, onSendAnother, onViewHistory }: Props) {
-  const [status, setStatus] = useState<'pending' | 'accepted' | 'declined' | 'completed' | 'refunded'>(
-    isTip ? 'completed' : 'pending'
+  const [status, setStatus] = useState<'draft' | 'pending' | 'accepted' | 'declined' | 'completed' | 'refunded'>(
+    isTip ? 'completed' : 'draft'
   )
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const [timeLeft, setTimeLeft] = useState('')
@@ -79,7 +79,7 @@ export function SuccessScreen({ taskRequestId, creatorName, taskLabel, amount, c
           </div>
         )}
 
-        {!isTip && status === 'pending' && (
+        {!isTip && (status === 'pending' || status === 'draft') && (
           <div className="text-center mb-10">
             <div className="w-20 h-20 rounded-full border-4 border-yellow-500 flex items-center justify-center mx-auto mb-4 animate-pulse">
               <span className="text-3xl">⏳</span>
@@ -148,9 +148,11 @@ export function SuccessScreen({ taskRequestId, creatorName, taskLabel, amount, c
             <div className={`w-2 h-2 rounded-full ${
               isTip || status === 'completed' ? 'bg-green-500' :
               status === 'accepted' ? 'bg-green-500 animate-pulse' :
-              status === 'pending' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-500'
+              status === 'pending' || status === 'draft' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-500'
             }`} />
-            <span className="text-sm text-gray-400 capitalize">{isTip ? 'Paid' : status}</span>
+            <span className="text-sm text-gray-400 capitalize">
+              {isTip ? 'Paid' : status === 'draft' ? 'Processing...' : status}
+            </span>
           </div>
         </div>
 
@@ -161,7 +163,7 @@ export function SuccessScreen({ taskRequestId, creatorName, taskLabel, amount, c
           </button>
         )}
 
-        {!isTip && status === 'pending' && (
+        {!isTip && (status === 'pending' || status === 'draft') && (
           <button onClick={onSendAnother}
             className="w-full border border-gray-700 text-gray-400 py-3 rounded-2xl font-medium hover:border-gray-500 transition">
             + Send another request
