@@ -1,18 +1,36 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function RegisterPage() {
+function RegisterForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [referredBy, setReferredBy] = useState<string | null>(null)
+  const [referrerName, setReferrerName] = useState<string | null>(null)
+
+  useEffect(() => {
+    const ref = searchParams.get('ref')
+    if (ref) {
+      setReferredBy(ref)
+      supabase
+        .from('creators')
+        .select('display_name')
+        .eq('referral_code', ref)
+        .single()
+        .then(({ data }) => {
+          if (data) setReferrerName(data.display_name)
+        })
+    }
+  }, [searchParams])
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault()
@@ -44,6 +62,8 @@ export default function RegisterPage() {
       email,
       username: username.toLowerCase(),
       display_name: displayName,
+      referral_code: username.toLowerCase(),
+      referred_by: referredBy || null,
     })
 
     if (profileError) {
@@ -66,6 +86,15 @@ export default function RegisterPage() {
           </Link>
           <p className="text-white/40 mt-2">Create your creator account</p>
         </div>
+
+        {referrerName && (
+          <div className="bg-[#4AFFD4]/[0.08] border border-[#4AFFD4]/20 rounded-2xl px-5 py-3 text-center">
+            <p className="text-[#4AFFD4] text-sm font-medium">
+              🎉 Invited by <span className="font-bold">{referrerName}</span>
+            </p>
+            <p className="text-white/30 text-xs mt-0.5">You're joining through their referral link</p>
+          </div>
+        )}
 
         <div className="bg-[#111117] rounded-3xl border border-white/[0.06] p-8">
           <form onSubmit={handleRegister} className="space-y-4">
@@ -111,5 +140,17 @@ export default function RegisterPage() {
         </p>
       </div>
     </main>
+  )
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={
+      <main className="min-h-screen bg-[#08080C] flex items-center justify-center">
+        <div className="w-5 h-5 border-2 border-white/[0.08] border-t-[#4AFFD4] rounded-full animate-spin" />
+      </main>
+    }>
+      <RegisterForm />
+    </Suspense>
   )
 }
