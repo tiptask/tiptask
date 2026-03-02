@@ -30,7 +30,7 @@ export default function Home() {
         </div>
 
         <p className="text-white/20 text-sm">
-          Lowest fees for live tipping · Automatic refund on decline
+          0% commission for 6 months · Automatic refund on decline
         </p>
       </div>
     </main>
