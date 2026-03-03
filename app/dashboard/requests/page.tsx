@@ -68,8 +68,7 @@ export default function RequestsPage() {
       const now = new Date()
       setPending((data || []).filter(r =>
         r.status === 'pending' &&
-        new Date(r.expires_at) > now &&
-        (r.task_id || r.custom_task_text)
+        new Date(r.expires_at) > now
       ))
       setAccepted((data || []).filter(r => r.status === 'accepted'))
 
@@ -95,7 +94,7 @@ export default function RequestsPage() {
           if (req.status === 'draft') return
           if (req.status === 'accepted') {
             setAccepted(prev => [req, ...prev])
-          } else if (req.status === 'pending' && new Date(req.expires_at) > new Date() && (req.task_id || req.custom_task_text)) {
+          } else if (req.status === 'pending' && new Date(req.expires_at) > new Date()) {
             setPending(prev => [...prev, req])
           }
         })
@@ -109,7 +108,7 @@ export default function RequestsPage() {
             setPending(prev => {
               const exists = prev.find(r => r.id === updated.id)
               if (exists) return prev.map(r => r.id === updated.id ? { ...r, ...updated } : r)
-              if (new Date(updated.expires_at) > new Date() && (updated.task_id || updated.custom_task_text)) {
+              if (new Date(updated.expires_at) > new Date()) {
                 return [...prev, updated]
               }
               return prev

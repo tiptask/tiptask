@@ -30,3 +30,11 @@ body {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(74, 255, 212, 0.15); border-radius: 2px; }
+
+html {
+  font-size: 112.5%;
+}
+
+html {
+  font-size: 125%;
+}

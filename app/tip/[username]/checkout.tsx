@@ -6,7 +6,7 @@ import { loadStripe } from '@stripe/stripe-js'
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!)
 
-function CheckoutForm({ onSuccess }: { onSuccess: () => void }) {
+function CheckoutForm({ taskRequestId, onSuccess }: { taskRequestId: string, onSuccess: () => void }) {
   const stripe = useStripe()
   const elements = useElements()
   const [paying, setPaying] = useState(false)
@@ -19,17 +19,30 @@ function CheckoutForm({ onSuccess }: { onSuccess: () => void }) {
     setPaying(true)
     setError('')
 
-    const { error } = await stripe.confirmPayment({
+    const { error: stripeError } = await stripe.confirmPayment({
       elements,
       redirect: 'if_required',
     })
 
-    if (error) {
-      setError(error.message || 'Payment failed')
+    if (stripeError) {
+      setError(stripeError.message || 'Payment failed')
       setPaying(false)
-    } else {
-      onSuccess()
+      return
     }
+
+    // Payment confirmed — update DB from draft → pending (or accepted for tips)
+    try {
+      await fetch('/api/payments/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_request_id: taskRequestId }),
+      })
+    } catch (err) {
+      // Non-critical for UX — DB update may still succeed
+      console.error('Confirm call failed:', err)
+    }
+
+    onSuccess()
   }
 
   return (
@@ -48,7 +61,15 @@ function CheckoutForm({ onSuccess }: { onSuccess: () => void }) {
   )
 }
 
-export function StripeCheckout({ clientSecret, onSuccess }: { clientSecret: string, onSuccess: () => void }) {
+export function StripeCheckout({
+  clientSecret,
+  taskRequestId,
+  onSuccess,
+}: {
+  clientSecret: string
+  taskRequestId: string
+  onSuccess: () => void
+}) {
   return (
     <Elements stripe={stripePromise} options={{
       clientSecret,
@@ -65,7 +86,7 @@ export function StripeCheckout({ clientSecret, onSuccess }: { clientSecret: stri
         }
       }
     }}>
-      <CheckoutForm onSuccess={onSuccess} />
+      <CheckoutForm taskRequestId={taskRequestId} onSuccess={onSuccess} />
     </Elements>
   )
 }

@@ -203,7 +203,7 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
             <p className="text-white/40 mt-1">{amount} {currency} · from {name}</p>
           </div>
           <div className="bg-[#111117] rounded-2xl p-6 border border-white/[0.06]">
-            <StripeCheckout clientSecret={clientSecret} onSuccess={() => setSuccess(true)} />
+            <StripeCheckout clientSecret={clientSecret} taskRequestId={taskRequestId!} onSuccess={() => setSuccess(true)} />
           </div>
           <button onClick={() => setClientSecret(null)}
             className="w-full text-white/20 text-sm py-4 hover:text-white/40 transition mt-2">
