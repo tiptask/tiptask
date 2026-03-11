@@ -139,7 +139,7 @@ export default function DashboardPage() {
                 <p className="text-white/25 text-xs mt-0.5">Start a session to receive requests</p>
               </div>
             </div>
-            <Link href="/dashboard/live" className="text-sm text-white/40 font-medium hover:text-white transition-colors">Start Live →</Link>
+            <Link href="/dashboard/live" className="text-sm text-white/40 font-medium hover:text-white transition-colors">Start Session →</Link>
           </div>
         )}
 
@@ -203,9 +203,9 @@ export default function DashboardPage() {
               ? 'bg-[#4AFFD4]/[0.08] border-[#4AFFD4]/20 hover:bg-[#4AFFD4]/[0.12]'
               : 'bg-[#111117] border-white/[0.06] hover:border-white/10'}`}>
             <p className="text-lg">🔴</p>
-            <p className="font-semibold mt-2">{session ? 'Live Session' : 'Start Live'}</p>
+            <p className="font-semibold mt-2">{session ? 'Tip Session' : 'Start Session'}</p>
             <p className={`text-sm mt-0.5 ${session ? 'text-[#4AFFD4]/60' : 'text-white/30'}`}>
-              {session ? 'Session is live' : 'Generate QR and go live'}
+              {session ? 'Session active' : 'Generate QR and start session'}
             </p>
           </Link>
 

@@ -18,7 +18,8 @@ function RegisterForm() {
   const [referrerName, setReferrerName] = useState<string | null>(null)
 
   useEffect(() => {
-    const ref = searchParams.get('ref')
+    // Priority: ?ref= URL param → localStorage (set when visiting a creator profile)
+    const ref = searchParams.get('ref') || localStorage.getItem('tiptask_ref')
     if (ref) {
       setReferredBy(ref)
       supabase
@@ -67,10 +68,13 @@ function RegisterForm() {
     })
 
     if (profileError) {
-      setError(profileError.message)
+      setError(`${profileError.message} (code: ${profileError.code}, details: ${profileError.details})`)
       setLoading(false)
       return
     }
+
+    // Clear referral from localStorage after successful registration
+    localStorage.removeItem('tiptask_ref')
 
     router.push('/dashboard')
   }

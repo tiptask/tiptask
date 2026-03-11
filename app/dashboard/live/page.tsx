@@ -16,6 +16,7 @@ export default function LivePage() {
     show_tasks: true, allow_custom_tasks: true, allow_free_tips: true,
     free_tip_min_amount: '5', use_landing_page: true,
   })
+  const [copiedObs, setCopiedObs] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -36,7 +37,7 @@ export default function LivePage() {
     if (!creator) return
     setStarting(true)
     const { data, error } = await supabase.from('sessions').insert({
-      creator_id: creator.id, title: 'Live Session', is_active: true,
+      creator_id: creator.id, title: 'Tip Session', is_active: true,
       show_tasks: config.show_tasks, allow_custom_tasks: config.allow_custom_tasks,
       allow_free_tips: config.allow_free_tips,
       free_tip_min_amount: parseFloat(config.free_tip_min_amount) || 5,
@@ -56,6 +57,7 @@ export default function LivePage() {
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
   const profileUrl = creator ? `${origin}/${creator.username}` : ''
   const tipUrl = creator ? `${origin}/tip/${creator.username}` : ''
+  const overlayUrl = creator ? `${origin}/overlay/${creator.username}` : ''
 
   if (loading) return (
     <main className="min-h-screen bg-[#08080C] flex items-center justify-center">
@@ -76,17 +78,21 @@ export default function LivePage() {
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center gap-4 mb-8">
             <button onClick={() => router.push('/dashboard')} className="text-white/30 hover:text-white/60 transition text-sm">← Back</button>
-            <h1 className="text-2xl font-bold text-white">Live Session</h1>
+            <h1 className="text-2xl font-bold text-white">Tip Session</h1>
           </div>
+
+          {/* Live badge */}
           <div className="bg-[#4AFFD4]/[0.06] border border-[#4AFFD4]/20 rounded-2xl p-4 text-center mb-6">
             <div className="flex items-center justify-center gap-2">
               <span className="relative flex h-2.5 w-2.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4AFFD4] opacity-50"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#4AFFD4]"></span>
               </span>
-              <p className="text-[#4AFFD4] font-semibold">Live — accepting requests</p>
+              <p className="text-[#4AFFD4] font-semibold">Session active — accepting tips</p>
             </div>
           </div>
+
+          {/* QR */}
           <div className="bg-[#111117] border border-white/[0.06] rounded-3xl p-8 flex flex-col items-center gap-4 mb-4">
             <div className="bg-white rounded-2xl p-4"><QRCode value={liveQr} size={200} /></div>
             <p className="text-white/30 font-mono text-sm break-all text-center">{liveQr}</p>
@@ -94,6 +100,8 @@ export default function LivePage() {
               {session.use_landing_page !== false ? '🖼 Profile landing page' : '⚡ Direct tip form'}
             </span>
           </div>
+
+          {/* Quick actions */}
           <div className="grid grid-cols-2 gap-4 mb-4">
             <a href={`/${creator?.username}`} target="_blank" rel="noopener noreferrer"
               className="bg-[#111117] border border-white/[0.06] rounded-2xl p-4 text-left hover:border-white/10 transition">
@@ -106,8 +114,82 @@ export default function LivePage() {
               <p className="text-white/30 text-sm">Manage incoming tips</p>
             </button>
           </div>
+
+          {/* OBS Overlay section */}
+          <div className="bg-[#111117] border border-white/[0.06] rounded-2xl overflow-hidden mb-4">
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-white/[0.04]">
+              <span className="text-lg">🖥</span>
+              <div>
+                <p className="font-semibold text-white">OBS Overlay</p>
+                <p className="text-white/30 text-sm">Add to OBS as a Browser Source</p>
+              </div>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              {/* URL copy */}
+              <div>
+                <p className="text-white/40 text-xs mb-2">Browser Source URL</p>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 font-mono text-sm text-white/50 truncate">
+                    {overlayUrl}
+                  </div>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(overlayUrl); setCopiedObs(true); setTimeout(() => setCopiedObs(false), 2500) }}
+                    className={`shrink-0 px-4 py-3 rounded-xl text-sm font-semibold transition ${copiedObs ? 'bg-[#4AFFD4]/10 text-[#4AFFD4] border border-[#4AFFD4]/20' : 'bg-white/[0.06] text-white/60 hover:bg-white/[0.09] border border-white/[0.06]'}`}>
+                    {copiedObs ? '✓ Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+
+              {/* OBS setup steps */}
+              <div className="bg-[#08080C] rounded-xl px-4 py-4 space-y-2.5 text-sm">
+                <p className="text-white/50 text-xs uppercase tracking-widest mb-3">Setup in OBS</p>
+                {[
+                  ['1', 'Sources → + → Browser Source'],
+                  ['2', 'Paste the URL above'],
+                  ['3', 'Set Width: 1920 · Height: 1080'],
+                  ['4', 'Check "Shutdown source when not visible"'],
+                  ['5', 'In Custom CSS add:', 'body { background-color: rgba(0,0,0,0) !important; }'],
+                ].map(([num, text, code]) => (
+                  <div key={num} className="flex gap-3">
+                    <span className="w-5 h-5 rounded-full bg-white/[0.06] text-white/30 text-xs flex items-center justify-center shrink-0 mt-0.5">{num}</span>
+                    <div>
+                      <p className="text-white/50">{text}</p>
+                      {code && <p className="font-mono text-xs text-[#4AFFD4]/70 mt-1 bg-[#4AFFD4]/[0.05] px-2 py-1 rounded-lg">{code}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* What the overlay shows */}
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { icon: '🔔', label: 'Request alerts' },
+                  { icon: '🎯', label: 'Active task' },
+                  { icon: '💸', label: 'Tip alerts' },
+                  { icon: '📱', label: 'QR code' },
+                ].map(item => (
+                  <span key={item.label} className="flex items-center gap-1.5 bg-white/[0.04] border border-white/[0.06] px-3 py-1.5 rounded-full text-xs text-white/40">
+                    {item.icon} {item.label}
+                  </span>
+                ))}
+              </div>
+
+              {/* Optional params */}
+              <details className="group">
+                <summary className="text-white/25 text-xs cursor-pointer hover:text-white/40 transition list-none flex items-center gap-1">
+                  <span className="group-open:rotate-90 transition-transform inline-block">▶</span> Customize with URL params
+                </summary>
+                <div className="mt-3 bg-[#08080C] rounded-xl px-4 py-3 font-mono text-xs space-y-1.5 text-white/35">
+                  <p><span className="text-[#4AFFD4]/60">?qr=0</span>      — hide QR code</p>
+                  <p><span className="text-[#4AFFD4]/60">?active=0</span>   — hide active task bar</p>
+                  <p><span className="text-[#4AFFD4]/60">?alerts=0</span>   — hide alert popups</p>
+                </div>
+              </details>
+            </div>
+          </div>
+
           <button onClick={endLive} className="w-full border border-red-500/20 text-red-400 py-3 rounded-2xl hover:bg-red-500/[0.06] transition">
-            End Live Session
+            End Tip Session
           </button>
         </div>
       </main>
@@ -119,11 +201,10 @@ export default function LivePage() {
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center gap-4 mb-8">
           <button onClick={() => router.push('/dashboard')} className="text-white/30 hover:text-white/60 transition text-sm">← Back</button>
-          <h1 className="text-2xl font-bold text-white">Start Live</h1>
+          <h1 className="text-2xl font-bold text-white">Start Tip Session</h1>
         </div>
 
         <div className="space-y-4 mb-8">
-          {/* Landing page toggle */}
           <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div>
@@ -139,7 +220,6 @@ export default function LivePage() {
             </div>
           </div>
 
-          {/* Tasks */}
           <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-5">
             <div className="flex items-center justify-between mb-1">
               <div>
@@ -156,7 +236,6 @@ export default function LivePage() {
             )}
           </div>
 
-          {/* Custom tasks */}
           <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-5 flex items-center justify-between">
             <div>
               <p className="font-semibold text-white">Allow custom task requests</p>
@@ -165,7 +244,6 @@ export default function LivePage() {
             <Toggle on={config.allow_custom_tasks} toggle={() => setConfig(p => ({ ...p, allow_custom_tasks: !p.allow_custom_tasks }))} />
           </div>
 
-          {/* Free tips */}
           <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div>
@@ -192,7 +270,7 @@ export default function LivePage() {
 
         <button onClick={startLive} disabled={starting || (!config.show_tasks && !config.allow_custom_tasks && !config.allow_free_tips)}
           className="w-full bg-[#4AFFD4] text-[#08080C] py-4 rounded-2xl font-extrabold text-xl hover:bg-[#6FFFDF] transition disabled:opacity-50">
-          {starting ? 'Starting...' : '🔴 Go Live'}
+          {starting ? 'Starting session...' : '🔴 Start Session'}
         </button>
       </div>
     </main>

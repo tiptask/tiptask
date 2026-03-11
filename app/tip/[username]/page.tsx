@@ -237,7 +237,7 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
         <div className="flex items-center justify-center gap-3 mt-1">
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 bg-[#4AFFD4] rounded-full animate-pulse" />
-            <span className="text-[#4AFFD4] text-xs font-medium">Live now</span>
+            <span className="text-[#4AFFD4] text-xs font-medium">Session active</span>
           </div>
           {name && session && (
             <button onClick={() => setShowHistory(true)}
