@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-export const dynamic = 'force-dynamic'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseAdmin = createClient(
@@ -34,7 +33,11 @@ export async function POST(req: Request) {
     })
 
     if (authError || !authData.user) {
-      return NextResponse.json({ error: authError?.message || 'Failed to create user' }, { status: 500 })
+      console.error('Admin createUser error:', JSON.stringify(authError))
+      return NextResponse.json({
+        error: authError?.message || 'Failed to create user',
+        details: JSON.stringify(authError)
+      }, { status: 500 })
     }
 
     const userId = authData.user.id
