@@ -1,18 +1,19 @@
 'use client'
-
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { supabase } from "@/lib/supabase"
-import type { Creator, Session, TaskRequest } from '@/types'
+import { supabase } from '@/lib/supabase'
 
 export default function DashboardPage() {
   const router = useRouter()
-  const [creator, setCreator] = useState<Creator | null>(null)
-  const [session, setSession] = useState<Session | null>(null)
-  const [pendingRequests, setPendingRequests] = useState<TaskRequest[]>([])
-  const [stats, setStats] = useState({ totalEarned: 0, completionRate: 100, totalRequests: 0 })
-  const [referralCount, setReferralCount] = useState(0)
+  const [creator, setCreator] = useState<any>(null)
+  const [session, setSession] = useState<any>(null)
+  const [recentTips, setRecentTips] = useState<any[]>([])
+  const [pendingRequests, setPendingRequests] = useState<any[]>([])
+  const [stats, setStats] = useState({
+    totalTips: 0, totalTipsAmount: 0,
+    totalRequests: 0, totalRequestsAmount: 0,
+  })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -20,240 +21,190 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/auth/login'); return }
 
-      const { data: creatorData } = await supabase
-        .from('creators').select('*').eq('id', user.id).single()
-      if (!creatorData) { router.push('/auth/login'); return }
-      setCreator(creatorData)
+      const { data: c } = await supabase.from('creators').select('*').eq('id', user.id).single()
+      if (!c) { router.push('/auth/login'); return }
+      setCreator(c)
 
-      const { data: sessionData } = await supabase
-        .from('sessions').select('*').eq('creator_id', user.id).eq('is_active', true).single()
-      setSession(sessionData ?? null)
+      const { data: s } = await supabase.from('sessions').select('*')
+        .eq('creator_id', user.id).eq('is_active', true).single()
+      setSession(s ?? null)
 
-      if (sessionData) {
-        const { data: requestsData } = await supabase
-          .from('task_requests').select('*').eq('session_id', sessionData.id)
-          .in('status', ['pending', 'accepted']).order('created_at', { ascending: false }).limit(5)
-        setPendingRequests(requestsData ?? [])
+      // Recent tips
+      const { data: tipsData } = await supabase.from('tips').select('*')
+        .eq('creator_id', user.id).eq('status', 'completed')
+        .order('created_at', { ascending: false }).limit(5)
+      setRecentTips(tipsData || [])
+
+      // Pending requests (current session only)
+      if (s) {
+        const { data: reqData } = await supabase.from('task_requests').select('*, tasks(*)')
+          .eq('session_id', s.id).eq('status', 'pending')
+          .order('created_at', { ascending: false }).limit(5)
+        setPendingRequests(reqData || [])
       }
 
-      const { data: allRequests } = await supabase
-        .from('task_requests').select('status, amount').eq('creator_id', user.id)
-      if (allRequests && allRequests.length > 0) {
-        const completed = allRequests.filter(r => r.status === 'completed')
-        const totalEarned = completed.reduce((sum, r) => sum + (r.amount || 0), 0)
-        const completionRate = Math.round((completed.length / allRequests.length) * 100)
-        setStats({ totalEarned, completionRate, totalRequests: allRequests.length })
-      }
+      // Lifetime stats
+      const { data: allTips } = await supabase.from('tips').select('amount')
+        .eq('creator_id', user.id).eq('status', 'completed')
+      const { data: allReqs } = await supabase.from('task_requests').select('amount')
+        .eq('creator_id', user.id).eq('status', 'completed')
 
-      if (creatorData.referral_code) {
-        const { count } = await supabase
-          .from('creators').select('id', { count: 'exact', head: true })
-          .eq('referred_by', creatorData.referral_code)
-        setReferralCount(count || 0)
-      }
+      setStats({
+        totalTips: allTips?.length || 0,
+        totalTipsAmount: allTips?.reduce((s, t) => s + t.amount, 0) || 0,
+        totalRequests: allReqs?.length || 0,
+        totalRequestsAmount: allReqs?.reduce((s, r) => s + r.amount, 0) || 0,
+      })
 
       setLoading(false)
     }
     load()
-  }, [])
+  }, [router])
 
-  useEffect(() => {
-    if (!creator) return
-    const channel = supabase.channel('dashboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `creator_id=eq.${creator.id}` },
-        async () => {
-          const { data } = await supabase.from('sessions').select('*').eq('creator_id', creator.id).eq('is_active', true).single()
-          setSession(data ?? null)
-        })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_requests', filter: `creator_id=eq.${creator.id}` },
-        async () => {
-          if (!session) return
-          const { data } = await supabase.from('task_requests').select('*')
-            .eq('session_id', session.id).in('status', ['pending', 'accepted'])
-            .order('created_at', { ascending: false }).limit(5)
-          setPendingRequests(data ?? [])
-        })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [creator, session])
-
-  async function handleSignOut() {
-    await supabase.auth.signOut()
-    router.push('/auth/login')
-  }
+  const currency = creator?.currency?.toUpperCase() ?? 'RON'
 
   if (loading) return (
-    <div className="min-h-screen bg-[#08080C] flex items-center justify-center">
+    <main className="min-h-screen bg-[#08080C] flex items-center justify-center">
       <div className="w-5 h-5 border-2 border-white/[0.08] border-t-[#4AFFD4] rounded-full animate-spin" />
-    </div>
+    </main>
   )
 
-  const pendingCount = pendingRequests.filter(r => r.status === 'pending').length
-  const acceptedCount = pendingRequests.filter(r => r.status === 'accepted').length
-
   return (
-    <div className="min-h-screen bg-[#08080C] text-white">
-      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-[#4AFFD4] opacity-[0.025] blur-[120px] pointer-events-none" />
+    <main className="min-h-screen bg-[#08080C] p-6">
+      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-[#4AFFD4] opacity-[0.02] blur-[120px] pointer-events-none" />
+      <div className="max-w-2xl mx-auto relative z-10">
 
-      {/* Nav */}
-      <div className="flex items-center justify-between px-6 py-5 max-w-4xl mx-auto relative z-10">
-        <span className="text-xl font-extrabold tracking-tight">Tip<span className="text-[#4AFFD4]">Task</span></span>
-        <div className="flex items-center gap-4">
-          <Link href="/dashboard/profile" className="text-sm text-white/30 hover:text-white/60 transition">Profile</Link>
-          <button onClick={handleSignOut} className="text-sm text-white/30 hover:text-white/60 transition-colors">Sign out</button>
-        </div>
-      </div>
-
-      <div className="max-w-4xl mx-auto px-6 pb-16 space-y-5 relative z-10">
-
-        <div>
-          <h1 className="text-2xl font-bold">Welcome, {creator?.display_name} 👋</h1>
-          <p className="text-white/30 text-sm mt-1">tiptask.io/{creator?.username}</p>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <p className="text-white/30 text-xs uppercase tracking-widest">TipTask</p>
+            <h1 className="text-2xl font-bold text-white mt-0.5">{creator?.display_name}</h1>
+          </div>
+          <Link href="/dashboard/profile"
+            className="w-10 h-10 rounded-full bg-[#4AFFD4]/10 border border-[#4AFFD4]/20 flex items-center justify-center text-[#4AFFD4] font-bold hover:bg-[#4AFFD4]/15 transition">
+            {creator?.display_name?.[0]}
+          </Link>
         </div>
 
         {/* Session banner */}
-        {session ? (
-          <div className="rounded-2xl border border-[#4AFFD4]/20 bg-[#4AFFD4]/[0.06] px-5 py-4 flex items-center justify-between">
+        <div className={`rounded-2xl border p-4 mb-6 ${
+          session
+            ? 'bg-[#4AFFD4]/[0.06] border-[#4AFFD4]/20'
+            : 'bg-[#111117] border-white/[0.06]'
+        }`}>
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4AFFD4] opacity-50"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-[#4AFFD4]"></span>
+              {session ? (
+                <>
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4AFFD4] opacity-50" />
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#4AFFD4]" />
+                  </span>
+                  <div>
+                    <p className="text-[#4AFFD4] font-semibold text-sm">Session active</p>
+                    <p className="text-white/30 text-xs">Requests enabled · Tips always on</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
+                  <div>
+                    <p className="text-white/60 font-semibold text-sm">No active session</p>
+                    <p className="text-white/25 text-xs">Tips still work · Requests disabled</p>
+                  </div>
+                </>
+              )}
+            </div>
+            <Link href="/dashboard/live"
+              className={`px-4 py-2 rounded-xl text-sm font-bold transition ${
+                session
+                  ? 'bg-white/[0.07] text-white/60 hover:bg-white/[0.10]'
+                  : 'bg-[#4AFFD4] text-[#08080C] hover:bg-[#6FFFDF]'
+              }`}>
+              {session ? 'Manage →' : 'Start session →'}
+            </Link>
+          </div>
+        </div>
+
+        {/* Stats — Tips vs Requests */}
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <Link href="/dashboard/tips" className="bg-[#111117] border border-white/[0.06] hover:border-amber-500/20 rounded-2xl p-4 transition group">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">💸</span>
+              <p className="text-white/40 text-xs font-semibold uppercase tracking-widest">Tips</p>
+            </div>
+            <p className="text-amber-400 font-black text-2xl">{stats.totalTipsAmount.toFixed(0)}</p>
+            <p className="text-white/20 text-xs">{currency} · {stats.totalTips} tips</p>
+          </Link>
+          <Link href="/dashboard/requests" className="bg-[#111117] border border-white/[0.06] hover:border-[#4AFFD4]/20 rounded-2xl p-4 transition group">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">🎯</span>
+              <p className="text-white/40 text-xs font-semibold uppercase tracking-widest">Requests</p>
+            </div>
+            <p className="text-[#4AFFD4] font-black text-2xl">{stats.totalRequestsAmount.toFixed(0)}</p>
+            <p className="text-white/20 text-xs">{currency} · {stats.totalRequests} completed</p>
+          </Link>
+        </div>
+
+        {/* Pending requests alert */}
+        {pendingRequests.length > 0 && (
+          <Link href="/dashboard/requests"
+            className="flex items-center justify-between bg-amber-500/[0.08] border border-amber-500/20 rounded-2xl px-5 py-4 mb-4 hover:bg-amber-500/[0.12] transition">
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400" />
               </span>
               <div>
-                <p className="font-semibold text-[#4AFFD4] text-sm">Session Live</p>
-                <p className="text-[#4AFFD4]/50 text-xs mt-0.5">
-                  {pendingCount > 0 ? `${pendingCount} pending request${pendingCount > 1 ? 's' : ''} waiting`
-                    : acceptedCount > 0 ? `${acceptedCount} accepted request${acceptedCount > 1 ? 's' : ''} in progress`
-                    : 'No requests yet — share your link!'}
-                </p>
+                <p className="text-amber-300 font-semibold text-sm">{pendingRequests.length} pending request{pendingRequests.length > 1 ? 's' : ''}</p>
+                <p className="text-amber-400/50 text-xs">Tap to accept or decline</p>
               </div>
             </div>
-            <Link href="/dashboard/live" className="text-sm text-[#4AFFD4] font-medium hover:text-[#6FFFDF] transition-colors">Manage →</Link>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-white/[0.06] bg-[#111117] px-5 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="h-3 w-3 rounded-full bg-white/10"></span>
-              <div>
-                <p className="font-semibold text-white/60 text-sm">No active session</p>
-                <p className="text-white/25 text-xs mt-0.5">Start a session to receive requests</p>
-              </div>
+            <span className="text-amber-400/50 text-sm">→</span>
+          </Link>
+        )}
+
+        {/* Recent tips */}
+        {recentTips.length > 0 && (
+          <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-4 mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-white/40 text-xs font-semibold uppercase tracking-widest">Recent tips</p>
+              <Link href="/dashboard/tips" className="text-white/25 text-xs hover:text-white/50 transition">See all →</Link>
             </div>
-            <Link href="/dashboard/live" className="text-sm text-white/40 font-medium hover:text-white transition-colors">Start Session →</Link>
+            <div className="space-y-2">
+              {recentTips.map(tip => (
+                <div key={tip.id} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm">💸</span>
+                    <span className="text-white/60 text-sm truncate">{tip.tipper_name}</span>
+                    {tip.message && <span className="text-white/25 text-xs italic truncate">"{tip.message}"</span>}
+                  </div>
+                  <span className="text-amber-400 font-bold text-sm shrink-0 ml-2">{tip.amount} {currency}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
+        {/* Nav grid */}
+        <div className="grid grid-cols-2 gap-3">
           {[
-            { label: 'Total earned', value: `${stats.totalEarned} ${creator?.currency ?? 'RON'}`, accent: true },
-            { label: 'Completion rate', value: `${stats.completionRate}%`, accent: false },
-            { label: 'Total requests', value: stats.totalRequests, accent: false },
-          ].map((stat) => (
-            <div key={stat.label} className="rounded-2xl bg-[#111117] border border-white/[0.06] px-5 py-5">
-              <p className="text-white/35 text-sm">{stat.label}</p>
-              <p className={`text-2xl font-bold mt-1 ${stat.accent ? 'text-[#4AFFD4]' : 'text-white'}`}>{stat.value}</p>
-            </div>
+            { href: '/dashboard/live', icon: '🔴', label: 'Session', sub: session ? 'Active' : 'Start one' },
+            { href: '/dashboard/requests', icon: '🎯', label: 'Requests', sub: pendingRequests.length > 0 ? `${pendingRequests.length} pending` : 'Manage' },
+            { href: '/dashboard/tips', icon: '💸', label: 'Tips', sub: 'Live feed' },
+            { href: '/dashboard/tasks', icon: '📋', label: 'Tasks', sub: 'Manage list' },
+            { href: '/dashboard/payments', icon: '💳', label: 'Payments', sub: 'Stripe' },
+            { href: '/dashboard/referrals', icon: '🔗', label: 'Referrals', sub: 'Earn 5%' },
+          ].map(item => (
+            <Link key={item.href} href={item.href}
+              className="bg-[#111117] border border-white/[0.06] hover:border-white/[0.10] rounded-2xl p-4 transition">
+              <p className="text-xl mb-2">{item.icon}</p>
+              <p className="font-semibold text-white text-sm">{item.label}</p>
+              <p className="text-white/30 text-xs mt-0.5">{item.sub}</p>
+            </Link>
           ))}
         </div>
-
-        {/* Requests preview */}
-        {session && pendingRequests.length > 0 && (
-          <div className="rounded-2xl bg-[#111117] border border-white/[0.06] overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.04]">
-              <h2 className="font-semibold text-sm text-white">Incoming Requests</h2>
-              <Link href="/dashboard/requests" className="text-xs text-white/30 hover:text-white/60 transition-colors">View all →</Link>
-            </div>
-            <div className="divide-y divide-white/[0.04]">
-              {pendingRequests.map((req) => {
-                const typeColor = req.task_id ? 'bg-blue-500/10 text-blue-400'
-                  : req.custom_task_text ? 'bg-purple-500/10 text-purple-400'
-                  : 'bg-amber-500/10 text-amber-400'
-                const typeLabel = req.task_id ? '🎯 Task' : req.custom_task_text ? '✏️ Custom' : '💸 Tip'
-                const statusColor = req.status === 'pending' ? 'text-amber-400' : 'text-[#4AFFD4]'
-                return (
-                  <div key={req.id} className="flex items-center justify-between px-5 py-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${typeColor}`}>{typeLabel}</span>
-                      <span className="text-sm text-white/50 truncate">
-                        {req.requester_name ?? 'Anonymous'}
-                        {req.custom_task_text ? ` — ${req.custom_task_text}` : req.message ? ` — ${req.message}` : ''}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0 ml-2">
-                      <span className="text-sm font-semibold text-white">{req.amount} {req.currency}</span>
-                      <span className={`text-xs capitalize ${statusColor}`}>{req.status}</span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            <div className="px-5 py-3 border-t border-white/[0.04]">
-              <Link href="/dashboard/requests" className="block w-full text-center text-sm font-medium text-white/60 bg-white/[0.04] hover:bg-white/[0.07] transition-colors rounded-xl py-2.5">
-                Manage Requests
-              </Link>
-            </div>
-          </div>
-        )}
-
-        {/* Nav grid — 6 cards */}
-        <div className="grid grid-cols-2 gap-4">
-          <Link href="/dashboard/live"
-            className={`rounded-2xl px-5 py-5 border transition-colors ${session
-              ? 'bg-[#4AFFD4]/[0.08] border-[#4AFFD4]/20 hover:bg-[#4AFFD4]/[0.12]'
-              : 'bg-[#111117] border-white/[0.06] hover:border-white/10'}`}>
-            <p className="text-lg">🔴</p>
-            <p className="font-semibold mt-2">{session ? 'Tip Session' : 'Start Session'}</p>
-            <p className={`text-sm mt-0.5 ${session ? 'text-[#4AFFD4]/60' : 'text-white/30'}`}>
-              {session ? 'Session active' : 'Generate QR and start session'}
-            </p>
-          </Link>
-
-          <Link href="/dashboard/tasks" className="rounded-2xl bg-[#111117] border border-white/[0.06] hover:border-white/10 transition-colors px-5 py-5">
-            <p className="text-lg">📋</p>
-            <p className="font-semibold mt-2 text-white">My Tasks</p>
-            <p className="text-sm text-white/30 mt-0.5">Manage your task list</p>
-          </Link>
-
-          <Link href="/dashboard/payments" className="rounded-2xl bg-[#111117] border border-white/[0.06] hover:border-white/10 transition-colors px-5 py-5">
-            <p className="text-lg">💳</p>
-            <p className="font-semibold mt-2 text-white">Payments</p>
-            <p className="text-sm text-white/30 mt-0.5">Connect Stripe to get paid</p>
-          </Link>
-
-          <Link href="/dashboard/requests" className="rounded-2xl bg-[#111117] border border-white/[0.06] hover:border-white/10 transition-colors px-5 py-5 relative">
-            {pendingCount > 0 && (
-              <span className="absolute top-4 right-4 bg-[#4AFFD4] text-[#08080C] text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
-                {pendingCount}
-              </span>
-            )}
-            <p className="text-lg">📬</p>
-            <p className="font-semibold mt-2 text-white">Requests</p>
-            <p className="text-sm text-white/30 mt-0.5">
-              {pendingCount > 0 ? `${pendingCount} waiting for you` : 'View all requests'}
-            </p>
-          </Link>
-
-          <Link href="/dashboard/profile" className="rounded-2xl bg-[#111117] border border-white/[0.06] hover:border-white/10 transition-colors px-5 py-5">
-            <p className="text-lg">👤</p>
-            <p className="font-semibold mt-2 text-white">Public Profile</p>
-            <p className="text-sm text-white/30 mt-0.5">Bio, socials, landing page</p>
-          </Link>
-
-          <Link href="/dashboard/referrals" className="rounded-2xl bg-[#111117] border border-white/[0.06] hover:border-white/10 transition-colors px-5 py-5 relative">
-            {referralCount > 0 && (
-              <span className="absolute top-4 right-4 bg-[#4AFFD4]/20 text-[#4AFFD4] text-xs font-bold rounded-full px-2 py-0.5">
-                {referralCount}
-              </span>
-            )}
-            <p className="text-lg">🔗</p>
-            <p className="font-semibold mt-2 text-white">Referrals</p>
-            <p className="text-sm text-white/30 mt-0.5">
-              {referralCount > 0 ? `${referralCount} creator${referralCount > 1 ? 's' : ''} referred` : 'Earn 5% per referral'}
-            </p>
-          </Link>
-        </div>
       </div>
-    </div>
+    </main>
   )
 }
