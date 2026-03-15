@@ -37,7 +37,7 @@ export default function LivePage() {
     if (!creator) return
     setStarting(true)
     const { data, error } = await supabase.from('sessions').insert({
-      creator_id: creator.id, title: 'Tip Session', is_active: true,
+      creator_id: creator.id, title: 'Live Session', is_active: true,
       show_tasks: config.show_tasks, allow_custom_tasks: config.allow_custom_tasks,
       allow_free_tips: config.allow_free_tips,
       free_tip_min_amount: parseFloat(config.free_tip_min_amount) || 5,
@@ -78,7 +78,7 @@ export default function LivePage() {
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center gap-4 mb-8">
             <button onClick={() => router.push('/dashboard')} className="text-white/30 hover:text-white/60 transition text-sm">← Back</button>
-            <h1 className="text-2xl font-bold text-white">Tip Session</h1>
+            <h1 className="text-2xl font-bold text-white">Live Session</h1>
           </div>
 
           {/* Live badge */}
@@ -88,7 +88,7 @@ export default function LivePage() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4AFFD4] opacity-50"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#4AFFD4]"></span>
               </span>
-              <p className="text-[#4AFFD4] font-semibold">Session active — accepting tips</p>
+              <p className="text-[#4AFFD4] font-semibold">Live — accepting requests</p>
             </div>
           </div>
 
@@ -189,7 +189,7 @@ export default function LivePage() {
           </div>
 
           <button onClick={endLive} className="w-full border border-red-500/20 text-red-400 py-3 rounded-2xl hover:bg-red-500/[0.06] transition">
-            End Tip Session
+            End Live Session
           </button>
         </div>
       </main>
@@ -201,7 +201,7 @@ export default function LivePage() {
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center gap-4 mb-8">
           <button onClick={() => router.push('/dashboard')} className="text-white/30 hover:text-white/60 transition text-sm">← Back</button>
-          <h1 className="text-2xl font-bold text-white">Start Tip Session</h1>
+          <h1 className="text-2xl font-bold text-white">Start Live</h1>
         </div>
 
         <div className="space-y-4 mb-8">
@@ -270,7 +270,7 @@ export default function LivePage() {
 
         <button onClick={startLive} disabled={starting || (!config.show_tasks && !config.allow_custom_tasks && !config.allow_free_tips)}
           className="w-full bg-[#4AFFD4] text-[#08080C] py-4 rounded-2xl font-extrabold text-xl hover:bg-[#6FFFDF] transition disabled:opacity-50">
-          {starting ? 'Starting session...' : '🔴 Start Session'}
+          {starting ? 'Starting...' : '🔴 Go Live'}
         </button>
       </div>
     </main>
