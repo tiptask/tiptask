@@ -29,6 +29,8 @@ const CURRENCIES = [
   { code: 'MXN', label: 'Mexican Peso' },
 ]
 
+const inputCls = "w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 text-white text-sm placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/40 transition"
+
 export default function ProfileSettingsPage() {
   const router = useRouter()
   const [profile, setProfile] = useState<any>(null)
@@ -62,11 +64,11 @@ export default function ProfileSettingsPage() {
     setTimeout(() => setSaved(false), 2500)
   }
 
-  const inputCls = "w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 text-white text-sm placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/40 transition"
-  const Field = ({ label, value, onChange, placeholder }: any) => (
+
+const Field = ({ label, value, onChange, placeholder }: any) => (
     <div><label className="block text-white/40 text-xs mb-1.5">{label}</label><input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className={inputCls} /></div>
   )
-  const Toggle = ({ on, toggle }: { on: boolean; toggle: () => void }) => (
+const Toggle = ({ on, toggle }: { on: boolean; toggle: () => void }) => (
     <button onClick={toggle} className={`w-12 h-6 rounded-full transition-colors shrink-0 ${on ? 'bg-[#4AFFD4]' : 'bg-white/10'}`}>
       <div className={`w-5 h-5 bg-white rounded-full transition-transform mx-0.5 shadow-sm ${on ? 'translate-x-6' : 'translate-x-0'}`} />
     </button>
