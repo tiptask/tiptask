@@ -3,16 +3,15 @@ import React from 'react'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { StripeCheckout } from './checkout'
-import { TopNav, BackButton } from '@/components/nav'
+import { TopNav } from '@/components/nav'
 import Link from 'next/link'
 
-type RequestMode = 'task' | 'custom' | null
-
-const MINIMUM_AMOUNTS: Record<string, number> = {
-  usd: 1.00, eur: 0.95, gbp: 0.80, ron: 5.00, cad: 1.40,
-  aud: 1.55, chf: 0.90, sek: 10.50, nok: 10.50, dkk: 7.00,
-  pln: 4.00, huf: 370, czk: 23.00, bgn: 1.85, jpy: 150,
-  inr: 84, brl: 5.00, mxn: 17.00, sgd: 1.35, hkd: 7.80, nzd: 1.65,
+// Minimum amounts in smallest currency unit (cents etc)
+const MINIMUMS: Record<string, number> = {
+  usd: 1.00, eur: 1.00, gbp: 1.00, ron: 5.00, cad: 1.00,
+  aud: 1.00, chf: 1.00, sek: 10.00, nok: 10.00, dkk: 7.00,
+  pln: 4.00, huf: 370, czk: 23.00, bgn: 2.00, jpy: 150,
+  inr: 84, brl: 5.00, mxn: 17.00, sgd: 1.00, hkd: 7.80, nzd: 1.00,
 }
 
 export default function TipPage({ params: paramsPromise }: { params: Promise<{ username: string }> }) {
@@ -23,12 +22,13 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [activeZone, setActiveZone] = useState<'tip' | 'request' | null>(null)
-  const [requestMode, setRequestMode] = useState<RequestMode>(null)
+  const [requestMode, setRequestMode] = useState<'task' | 'custom' | null>(null)
   const [selectedTask, setSelectedTask] = useState<any>(null)
   const [customTask, setCustomTask] = useState('')
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
   const [message, setMessage] = useState('')
+  const [coverFee, setCoverFee] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [clientSecret, setClientSecret] = useState<string | null>(null)
@@ -63,18 +63,32 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
 
   const currency = (profile?.currency || 'RON').toUpperCase()
   const currencyLower = currency.toLowerCase()
-  const globalMin = MINIMUM_AMOUNTS[currencyLower] ?? 1.00
+  const globalMin = MINIMUMS[currencyLower] ?? 1.00
+  const amountNum = parseFloat(amount) || 0
+
+  // Fee calculations
+  const stripeFeeAmount = amountNum > 0 ? +(amountNum * 0.029 + 0.30).toFixed(2) : 0
+  const totalIfCovered = amountNum > 0 ? +(amountNum + stripeFeeAmount).toFixed(2) : 0
+  const creatorGetsIfNotCovered = amountNum > 0 ? +(amountNum * (1 - (profile?.custom_commission_rate ?? 0.15)) - stripeFeeAmount).toFixed(2) : 0
+  const creatorGetsIfCovered = amountNum > 0 ? +(amountNum * (1 - (profile?.custom_commission_rate ?? 0.15))).toFixed(2) : 0
+  const creatorGets = coverFee ? creatorGetsIfCovered : creatorGetsIfNotCovered
+  const totalToPay = coverFee ? totalIfCovered : amountNum
 
   async function handleTipSubmit() {
     if (!profile) return
     if (!name.trim()) { setError('Enter your name'); return }
-    const amountNum = parseFloat(amount)
     if (!amountNum || amountNum < globalMin) { setError(`Minimum tip is ${globalMin} ${currency}`); return }
     setSubmitting(true); setError('')
     try {
       const res = await fetch('/api/tips/create', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiver_username: params.username, sender_name: name, message, amount: amountNum, currency: profile.currency || 'RON', sender_id: currentUser?.id || null }),
+        body: JSON.stringify({
+          receiver_username: params.username,
+          sender_name: name, message, amount: amountNum,
+          currency: profile.currency || 'RON',
+          sender_id: currentUser?.id || null,
+          cover_fee: coverFee,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -89,14 +103,19 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
     if (!name.trim()) { setError('Enter your name'); return }
     if (requestMode === 'task' && !selectedTask) { setError('Select a task'); return }
     if (requestMode === 'custom' && !customTask.trim()) { setError('Describe your request'); return }
-    const amountNum = parseFloat(amount)
     const minAmount = requestMode === 'task' && selectedTask ? Math.max(selectedTask.min_amount || 0, globalMin) : globalMin
     if (!amountNum || amountNum < minAmount) { setError(`Minimum is ${minAmount} ${currency}`); return }
     setSubmitting(true); setError('')
     try {
       const res = await fetch('/api/payments/create-intent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: session.id, receiver_id: profile.id, task_id: selectedTask?.id || null, custom_task_text: requestMode === 'custom' ? customTask : null, sender_name: name, sender_id: currentUser?.id || null, amount: amountNum, message }),
+        body: JSON.stringify({
+          session_id: session.id, receiver_id: profile.id,
+          task_id: selectedTask?.id || null,
+          custom_task_text: requestMode === 'custom' ? customTask : null,
+          sender_name: name, sender_id: currentUser?.id || null,
+          amount: amountNum, message, cover_fee: coverFee,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -120,19 +139,13 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
       <TopNav />
       <main className="min-h-screen bg-[#08080C] text-white flex items-center justify-center p-6 pt-20">
         <div className="max-w-md w-full text-center">
-          <div className="w-16 h-16 rounded-full bg-[#4AFFD4]/10 border-2 border-[#4AFFD4]/20 flex items-center justify-center mx-auto mb-6 text-3xl">
-            {tipId ? '💸' : '🎯'}
-          </div>
+          <div className="w-16 h-16 rounded-full bg-[#4AFFD4]/10 border-2 border-[#4AFFD4]/20 flex items-center justify-center mx-auto mb-6 text-3xl">{tipId ? '💸' : '🎯'}</div>
           <h2 className="text-2xl font-bold mb-2">{tipId ? 'Tip sent!' : 'Request sent!'}</h2>
           <p className="text-white/40 mb-8">{tipId ? `Thanks for supporting ${profile.display_name}` : `Waiting for ${profile.display_name} to accept`}</p>
           <div className="space-y-3">
             <button onClick={resetAll} className="w-full bg-[#4AFFD4] text-[#08080C] py-3 rounded-2xl font-bold hover:bg-[#6FFFDF] transition">Send another</button>
             <Link href={`/${profile.username}`} className="block w-full bg-white/[0.06] text-white/60 py-3 rounded-2xl font-medium hover:bg-white/[0.09] transition">← Back to profile</Link>
-            {!currentUser && (
-              <Link href={`/auth/register?ref=${profile.username}`} className="block w-full border border-[#4AFFD4]/20 text-[#4AFFD4] py-3 rounded-2xl font-medium hover:bg-[#4AFFD4]/[0.06] transition text-sm">
-                Join TipTask to track your history →
-              </Link>
-            )}
+            {!currentUser && <Link href={`/auth/register?ref=${profile.username}`} className="block w-full border border-[#4AFFD4]/20 text-[#4AFFD4] py-3 rounded-2xl font-medium hover:bg-[#4AFFD4]/[0.06] transition text-sm">Join TipTask to track your history →</Link>}
           </div>
         </div>
       </main>
@@ -147,7 +160,7 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
           <div className="text-center mb-8">
             <p className="text-white/35 text-sm mb-1">{profile.display_name}</p>
             <h1 className="text-2xl font-bold">{activeZone === 'tip' ? '💸 Tip' : selectedTask?.title || customTask}</h1>
-            <p className="text-white/40 mt-1">{amount} {currency} · from {name}</p>
+            <p className="text-white/40 mt-1">{totalToPay} {currency} · from {name}</p>
           </div>
           <div className="bg-[#111117] rounded-2xl p-6 border border-white/[0.06]">
             <StripeCheckout clientSecret={clientSecret} tipId={tipId || ''} taskRequestId={taskRequestId || ''} onSuccess={() => setSuccess(true)} />
@@ -158,6 +171,7 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
     </>
   )
 
+  const showForm = activeZone === 'tip' || (activeZone === 'request' && requestMode)
   const canSubmit = activeZone !== null && name.trim() && amount && (
     activeZone === 'tip' || (requestMode === 'task' && selectedTask) || (requestMode === 'custom' && customTask.trim())
   )
@@ -204,11 +218,11 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
               <div className="px-5 pb-5 space-y-3 border-t border-white/[0.05] pt-4">
                 <input type="text" value={name} onChange={e => setName(e.target.value.slice(0, 30))} placeholder="Your name" className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 text-white text-sm placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/40 transition" />
                 <div className="relative">
-                  <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder={`Amount (min ${globalMin})`} min={globalMin} className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 pr-16 text-white text-sm placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/40 transition" />
+                  <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder={`Amount (min ${globalMin})`} className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 pr-16 text-white text-sm placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/40 transition" />
                   <span className="absolute right-4 top-3 text-white/25 text-sm">{currency}</span>
                 </div>
                 <div className="flex gap-2">
-                  {[10, 20, 50, 100].filter(v => v >= globalMin).map(v => (
+                  {[5, 10, 20, 50].filter(v => v >= globalMin).map(v => (
                     <button key={v} onClick={() => setAmount(v.toString())} className={`flex-1 py-2 rounded-xl text-xs font-semibold transition ${amount === v.toString() ? 'bg-[#4AFFD4] text-[#08080C]' : 'bg-white/[0.05] text-white/40 hover:bg-white/[0.08]'}`}>{v}</button>
                   ))}
                 </div>
@@ -258,7 +272,8 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
                     <>
                       <input type="text" value={name} onChange={e => setName(e.target.value.slice(0, 30))} placeholder="Your name" className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 text-white text-sm placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/40 transition" />
                       <div className="relative">
-                        <input type="number" value={amount} onChange={e => setAmount(e.target.value)} readOnly={requestMode === 'task' && !!selectedTask?.suggested_amount}
+                        <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+                          readOnly={requestMode === 'task' && !!selectedTask?.suggested_amount}
                           placeholder={`Amount (min ${requestMode === 'task' && selectedTask ? Math.max(selectedTask.min_amount || 0, globalMin) : globalMin})`}
                           className={`w-full border rounded-xl px-4 py-3 pr-16 text-white text-sm placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/40 transition ${requestMode === 'task' && selectedTask?.suggested_amount ? 'bg-white/[0.03] border-white/[0.04] cursor-not-allowed text-white/30' : 'bg-[#08080C] border-white/[0.08]'}`} />
                         <span className="absolute right-4 top-3 text-white/25 text-sm">{currency}</span>
@@ -273,6 +288,33 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
             <div className="rounded-2xl border border-white/[0.04] bg-[#111117]/50 px-5 py-4 flex items-center gap-3 opacity-50">
               <div className="w-9 h-9 rounded-xl bg-white/[0.04] flex items-center justify-center text-lg">🎯</div>
               <div><p className="font-semibold text-sm text-white/50">Requests unavailable</p><p className="text-white/20 text-xs mt-0.5">No active session</p></div>
+            </div>
+          )}
+
+          {/* Fee toggle - only show when amount is set */}
+          {showForm && amountNum >= globalMin && (
+            <div className={`rounded-2xl border p-4 transition ${coverFee ? 'border-[#4AFFD4]/20 bg-[#4AFFD4]/[0.04]' : 'border-white/[0.06] bg-[#111117]'}`}>
+              <button onClick={() => setCoverFee(f => !f)} className="w-full flex items-center justify-between gap-3">
+                <div className="text-left">
+                  <p className="text-white text-sm font-medium">Cover processing fee</p>
+                  <p className="text-white/30 text-xs mt-0.5">
+                    {coverFee
+                      ? `You pay ${totalIfCovered} ${currency} · creator gets ~${creatorGetsIfCovered} ${currency}`
+                      : `You pay ${amountNum} ${currency} · creator gets ~${Math.max(0, creatorGetsIfNotCovered)} ${currency}`}
+                  </p>
+                </div>
+                <div className={`w-12 h-6 rounded-full transition-colors shrink-0 ${coverFee ? 'bg-[#4AFFD4]' : 'bg-white/10'}`}>
+                  <div className={`w-5 h-5 bg-white rounded-full transition-transform mx-0.5 mt-0.5 shadow-sm ${coverFee ? 'translate-x-6' : 'translate-x-0'}`} />
+                </div>
+              </button>
+              {amountNum > 0 && (
+                <div className="mt-2 pt-2 border-t border-white/[0.05] flex justify-between text-xs">
+                  <span className="text-white/25">+{stripeFeeAmount} {currency} processing</span>
+                  <span className={coverFee ? 'text-[#4AFFD4] font-semibold' : 'text-white/25'}>
+                    Total: {coverFee ? totalIfCovered : amountNum} {currency}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -293,9 +335,13 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
             <button onClick={activeZone === 'tip' ? handleTipSubmit : handleRequestSubmit} disabled={submitting || !canSubmit}
               className="w-full py-4 rounded-2xl font-bold text-base transition-all disabled:opacity-30 bg-[#4AFFD4] text-[#08080C] hover:bg-[#6FFFDF] active:scale-[0.98]">
               {submitting ? 'Processing...' : !canSubmit ? 'Select an option above' :
-               activeZone === 'tip' ? `💸 Send tip · ${amount || '0'} ${currency}` : `🎯 Send request · ${amount || '0'} ${currency}`}
+               activeZone === 'tip'
+                 ? `💸 Send tip · ${coverFee ? totalIfCovered : amountNum || '0'} ${currency}`
+                 : `🎯 Send request · ${coverFee ? totalIfCovered : amountNum || '0'} ${currency}`}
             </button>
-            <p className="text-center text-white/15 text-xs mt-2">{activeZone === 'tip' ? 'Charged immediately · no refunds' : 'Full refund if declined · Stripe secured'}</p>
+            <p className="text-center text-white/15 text-xs mt-2">
+              {activeZone === 'tip' ? 'Secured by Stripe' : 'Full refund if declined · Stripe secured'}
+            </p>
           </div>
         </div>
       </main>
