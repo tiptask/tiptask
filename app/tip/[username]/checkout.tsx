@@ -1,12 +1,15 @@
 'use client'
-
 import { useState } from 'react'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { loadStripe } from '@stripe/stripe-js'
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!)
 
-function CheckoutForm({ taskRequestId, onSuccess }: { taskRequestId: string; onSuccess: () => void }) {
+function CheckoutForm({ taskRequestId, tipId, onSuccess }: {
+  taskRequestId: string
+  tipId: string
+  onSuccess: () => void
+}) {
   const stripe = useStripe()
   const elements = useElements()
   const [paying, setPaying] = useState(false)
@@ -15,7 +18,6 @@ function CheckoutForm({ taskRequestId, onSuccess }: { taskRequestId: string; onS
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!stripe || !elements) return
-
     setPaying(true)
     setError('')
 
@@ -30,12 +32,16 @@ function CheckoutForm({ taskRequestId, onSuccess }: { taskRequestId: string; onS
       return
     }
 
-    // Confirm payment in DB — moves status from draft → pending (tasks) or draft → accepted (tips)
+    // Confirm in DB
     try {
+      const body = tipId
+        ? { tip_id: tipId }
+        : { task_request_id: taskRequestId }
+
       await fetch('/api/payments/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_request_id: taskRequestId }),
+        body: JSON.stringify(body),
       })
     } catch (err) {
       console.error('Confirm error:', err)
@@ -48,26 +54,24 @@ function CheckoutForm({ taskRequestId, onSuccess }: { taskRequestId: string; onS
     <form onSubmit={handleSubmit} className="space-y-4">
       <PaymentElement />
       {error && <p className="text-red-400 text-sm">{error}</p>}
-      <button
-        type="submit"
-        disabled={!stripe || paying}
-        className="w-full bg-white text-black py-4 rounded-2xl font-bold text-lg hover:bg-gray-100 transition disabled:opacity-50"
-      >
+      <button type="submit" disabled={!stripe || paying}
+        className="w-full bg-[#4AFFD4] text-[#08080C] py-4 rounded-2xl font-bold text-lg hover:bg-[#6FFFDF] transition disabled:opacity-50">
         {paying ? 'Processing...' : 'Confirm Payment'}
       </button>
-      <p className="text-center text-gray-600 text-xs">Full refund if declined · Powered by Stripe</p>
+      <p className="text-center text-white/20 text-xs">Secured by Stripe</p>
     </form>
   )
 }
 
-export function StripeCheckout({ clientSecret, taskRequestId, onSuccess }: {
+export function StripeCheckout({ clientSecret, taskRequestId, tipId, onSuccess }: {
   clientSecret: string
   taskRequestId: string
+  tipId: string
   onSuccess: () => void
 }) {
   return (
     <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'night' } }}>
-      <CheckoutForm taskRequestId={taskRequestId} onSuccess={onSuccess} />
+      <CheckoutForm taskRequestId={taskRequestId} tipId={tipId} onSuccess={onSuccess} />
     </Elements>
   )
 }
