@@ -14,6 +14,13 @@ export default function RequestsPage() {
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState<string | null>(null)
   const [extendConfirm, setExtendConfirm] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+
+  // Live countdown ticker
+  useEffect(() => {
+    const interval = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(interval)
+  }, [])
   const [sessionId, setSessionId] = useState<string | null>(null)
 
   const loadRequests = useCallback(async (sid: string) => {
@@ -99,6 +106,7 @@ export default function RequestsPage() {
     setExtendConfirm(null)
   }
 
+  // tick dependency forces re-render every second
   function formatExpiry(expiresAt: string | null) {
     if (!expiresAt) return null
     const diff = new Date(expiresAt).getTime() - Date.now()
@@ -116,6 +124,7 @@ export default function RequestsPage() {
     const expiry = formatExpiry(req.expires_at)
     const isExpiringSoon = req.expires_at && new Date(req.expires_at).getTime() - Date.now() < 3 * 60 * 1000
 
+    void tick // use tick to force timer re-render
     return (
       <div className={`rounded-2xl border p-4 transition ${
         showActions
