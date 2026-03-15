@@ -1,32 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { stripe } from '@/lib/stripe'
-import { getSupabaseAdmin } from '@/lib/supabase'
+import Stripe from 'stripe'
+import { createClient } from '@supabase/supabase-js'
+export const dynamic = 'force-dynamic'
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function POST(req: NextRequest) {
   try {
-    const { creator_id, return_url } = await req.json()
-    const supabase = getSupabaseAdmin()
+    const { user_id, return_url } = await req.json()
 
-    const { data: creator } = await supabase
-      .from('creators').select('*').eq('id', creator_id).single()
-    if (!creator) return NextResponse.json({ error: 'Creator not found' }, { status: 404 })
+    const { data: user } = await supabase.from('users').select('*').eq('id', user_id).single()
+    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
-    let accountId = creator.stripe_account_id
+    let accountId = user.stripe_account_id
 
-    // Create Connect account if doesn't exist
     if (!accountId) {
       const account = await stripe.accounts.create({
         type: 'express',
-        metadata: { creator_id },
+        metadata: { user_id },
       })
       accountId = account.id
-
-      await supabase.from('creators')
-        .update({ stripe_account_id: accountId })
-        .eq('id', creator_id)
+      await supabase.from('users').update({ stripe_account_id: accountId }).eq('id', user_id)
     }
 
-    // Create onboarding link
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
       refresh_url: `${return_url}?stripe=refresh`,
@@ -35,7 +32,8 @@ export async function POST(req: NextRequest) {
     })
 
     return NextResponse.json({ url: accountLink.url })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  } catch (err: any) {
+    console.error('Stripe connect error:', err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
