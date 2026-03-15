@@ -1,256 +1,103 @@
 'use client'
-
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import type { Creator, Task } from '@/types'
-
-const CATEGORIES = ['general', 'dj', 'fitness', 'gaming', 'art', 'cooking', 'talk']
-
-type NewTask = {
-  title: string
-  description: string
-  category: string
-  price_type: 'fixed' | 'minimum' | 'free'
-  price: string
-}
-
-const emptyTask: NewTask = {
-  title: '',
-  description: '',
-  category: 'general',
-  price_type: 'minimum',
-  price: '',
-}
+import { TopNav, BackButton, BottomNav } from '@/components/nav'
 
 export default function TasksPage() {
   const router = useRouter()
-  const [creator, setCreator] = useState<Creator | null>(null)
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [profile, setProfile] = useState<any>(null)
+  const [tasks, setTasks] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [newTask, setNewTask] = useState<NewTask>(emptyTask)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ title: '', description: '', suggested_amount: '', min_amount: '', category: '' })
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/auth/login'); return }
-
-      const { data: creatorData } = await supabase
-        .from('creators').select('*').eq('id', user.id).single()
-      setCreator(creatorData)
-
-      const { data: tasksData } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('creator_id', user.id)
-        .order('created_at', { ascending: false })
-      setTasks(tasksData || [])
+      const { data: p } = await supabase.from('users').select('*').eq('id', user.id).single()
+      setProfile(p)
+      const { data: t } = await supabase.from('tasks').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
+      setTasks(t || [])
       setLoading(false)
     }
     load()
   }, [router])
 
-  async function saveTask() {
-    if (!creator) return
-    if (!newTask.title.trim()) { setError('Task title is required'); return }
-    if (newTask.price_type !== 'free' && !newTask.price) { setError('Please enter a price'); return }
-
-    setSaving(true)
-    setError('')
-
-    const { data, error: insertError } = await supabase.from('tasks').insert({
-      creator_id: creator.id,
-      title: newTask.title.trim(),
-      description: newTask.description.trim() || null,
-      category: newTask.category,
-      suggested_amount: newTask.price_type === 'fixed' ? parseFloat(newTask.price) : null,
-      min_amount: newTask.price_type === 'minimum' ? parseFloat(newTask.price) : newTask.price_type === 'free' ? 1 : parseFloat(newTask.price),
-      is_active: true,
-    }).select().single()
-
-    if (insertError) {
-      setError(insertError.message)
-    } else {
-      setTasks(prev => [data, ...prev])
-      setNewTask(emptyTask)
-      setShowForm(false)
-    }
-    setSaving(false)
+  async function addTask() {
+    if (!profile || !form.title.trim()) return
+    const { data } = await supabase.from('tasks').insert({ user_id: profile.id, title: form.title, description: form.description || null, suggested_amount: form.suggested_amount ? parseFloat(form.suggested_amount) : null, min_amount: form.min_amount ? parseFloat(form.min_amount) : null, category: form.category || null, is_active: true }).select().single()
+    if (data) { setTasks(p => [data, ...p]); setForm({ title: '', description: '', suggested_amount: '', min_amount: '', category: '' }); setAdding(false) }
   }
 
-  async function toggleTask(task: Task) {
-    await supabase.from('tasks').update({ is_active: !task.is_active }).eq('id', task.id)
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, is_active: !t.is_active } : t))
+  async function toggleActive(id: string, current: boolean) {
+    await supabase.from('tasks').update({ is_active: !current }).eq('id', id)
+    setTasks(p => p.map(t => t.id === id ? { ...t, is_active: !current } : t))
   }
 
   async function deleteTask(id: string) {
     await supabase.from('tasks').delete().eq('id', id)
-    setTasks(prev => prev.filter(t => t.id !== id))
+    setTasks(p => p.filter(t => t.id !== id))
   }
 
-  if (loading) return (
-    <main className="min-h-screen bg-[#08080C] flex items-center justify-center">
-      <div className="w-5 h-5 border-2 border-white/[0.08] border-t-[#4AFFD4] rounded-full animate-spin" />
-    </main>
-  )
+  const currency = profile?.currency?.toUpperCase() ?? 'RON'
+  const inputCls = "w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 text-white text-sm placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/40 transition"
+
+  if (loading) return (<><TopNav /><main className="min-h-screen bg-[#08080C] flex items-center justify-center pt-14"><div className="w-5 h-5 border-2 border-white/[0.08] border-t-[#4AFFD4] rounded-full animate-spin" /></main></>)
 
   return (
-    <main className="min-h-screen bg-[#08080C] p-8">
-      <div className="max-w-2xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <button onClick={() => router.push('/dashboard')} className="text-white/30 hover:text-white/60 transition text-sm">← Back</button>
-            <h1 className="text-2xl font-bold text-white">My Tasks</h1>
+    <>
+      <TopNav />
+      <main className="min-h-screen bg-[#08080C] pt-14 pb-24">
+        <div className="max-w-2xl mx-auto p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-4"><BackButton href="/dashboard" /><h1 className="text-2xl font-bold text-white">Tasks</h1></div>
+            <button onClick={() => setAdding(p => !p)} className="bg-[#4AFFD4] text-[#08080C] px-4 py-2 rounded-xl text-sm font-bold hover:bg-[#6FFFDF] transition">+ Add</button>
           </div>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="bg-[#4AFFD4] text-[#08080C] px-4 py-2 rounded-xl font-bold hover:bg-[#6FFFDF] transition text-sm"
-          >
-            + Add task
-          </button>
-        </div>
 
-        {showForm && (
-          <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-6 mb-6 space-y-4">
-            <h2 className="font-semibold text-lg text-white">New task</h2>
-
-            <div>
-              <label className="block text-sm font-medium text-white/50 mb-1.5">Title *</label>
-              <input
-                type="text"
-                value={newTask.title}
-                onChange={e => setNewTask(p => ({ ...p, title: e.target.value }))}
-                placeholder="e.g. Play a song request"
-                className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/50 transition"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-white/50 mb-1.5">Description <span className="text-white/20 font-normal">(optional)</span></label>
-              <input
-                type="text"
-                value={newTask.description}
-                onChange={e => setNewTask(p => ({ ...p, description: e.target.value }))}
-                placeholder="Short explanation for viewers"
-                className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/50 transition"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-white/50 mb-1.5">Category</label>
-              <select
-                value={newTask.category}
-                onChange={e => setNewTask(p => ({ ...p, category: e.target.value }))}
-                className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#4AFFD4]/50 transition"
-              >
-                {CATEGORIES.map(c => (
-                  <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-white/50 mb-2">Pricing</label>
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                {(['fixed', 'minimum', 'free'] as const).map(type => (
-                  <button
-                    key={type}
-                    onClick={() => setNewTask(p => ({ ...p, price_type: type }))}
-                    className={`py-2 rounded-xl text-sm font-medium transition ${
-                      newTask.price_type === type
-                        ? 'bg-[#4AFFD4] text-[#08080C]'
-                        : 'bg-white/[0.04] border border-white/[0.08] text-white/50 hover:border-white/15'
-                    }`}
-                  >
-                    {type === 'fixed' ? 'Fixed price' : type === 'minimum' ? 'Minimum' : 'Viewer decides'}
-                  </button>
-                ))}
+          {adding && (
+            <div className="bg-[#111117] border border-[#4AFFD4]/20 rounded-2xl p-5 mb-5 space-y-3">
+              <input value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="Task title *" className={inputCls} />
+              <input value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Description (optional)" className={inputCls} />
+              <div className="grid grid-cols-2 gap-3">
+                <input type="number" value={form.suggested_amount} onChange={e => setForm(p => ({ ...p, suggested_amount: e.target.value }))} placeholder={`Fixed price (${currency})`} className={inputCls} />
+                <input type="number" value={form.min_amount} onChange={e => setForm(p => ({ ...p, min_amount: e.target.value }))} placeholder={`Min amount (${currency})`} className={inputCls} />
               </div>
-              {newTask.price_type !== 'free' && (
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={newTask.price}
-                    onChange={e => setNewTask(p => ({ ...p, price: e.target.value }))}
-                    placeholder={newTask.price_type === 'fixed' ? 'Fixed amount' : 'Minimum amount'}
-                    min="1"
-                    className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/50 transition pr-16"
-                  />
-                  <span className="absolute right-4 top-3 text-white/20">RON</span>
-                </div>
-              )}
-              <p className="text-white/20 text-xs mt-2">
-                {newTask.price_type === 'fixed' ? 'Viewers pay exactly this amount' :
-                 newTask.price_type === 'minimum' ? 'Viewers can pay more if they want' :
-                 'Viewers choose how much to pay'}
-              </p>
+              <div className="flex gap-2">
+                <button onClick={addTask} className="flex-1 bg-[#4AFFD4] text-[#08080C] py-2.5 rounded-xl font-bold text-sm hover:bg-[#6FFFDF] transition">Save task</button>
+                <button onClick={() => setAdding(false)} className="px-4 py-2.5 rounded-xl border border-white/[0.08] text-white/40 text-sm hover:text-white/60 transition">Cancel</button>
+              </div>
             </div>
+          )}
 
-            {error && <p className="text-red-400 text-sm">{error}</p>}
-
-            <div className="flex gap-3">
-              <button
-                onClick={saveTask}
-                disabled={saving}
-                className="flex-1 bg-[#4AFFD4] text-[#08080C] py-3 rounded-xl font-bold hover:bg-[#6FFFDF] transition disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Save task'}
-              </button>
-              <button
-                onClick={() => { setShowForm(false); setNewTask(emptyTask); setError('') }}
-                className="px-6 py-3 border border-white/[0.08] rounded-xl text-white/40 hover:border-white/15 transition"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {tasks.length === 0 && !showForm ? (
-          <div className="text-center py-20">
-            <p className="text-white/25 mb-2">No tasks yet</p>
-            <p className="text-white/10 text-sm">Add tasks so viewers know what they can request</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {tasks.map(task => (
-              <div key={task.id} className={`bg-[#111117] border border-white/[0.06] rounded-2xl p-4 flex items-center gap-4 transition ${!task.is_active ? 'opacity-40' : ''}`}>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium text-white">{task.title}</p>
-                    <span className="text-xs text-white/30 bg-white/[0.04] px-2 py-0.5 rounded-full">{task.category}</span>
+          {tasks.length === 0 ? (
+            <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-8 text-center"><p className="text-white/40 text-sm">No tasks yet</p><p className="text-white/20 text-xs mt-1">Tasks appear in the request form for your viewers</p></div>
+          ) : (
+            <div className="space-y-3">
+              {tasks.map(task => (
+                <div key={task.id} className={`bg-[#111117] border rounded-2xl p-4 transition ${task.is_active ? 'border-white/[0.06]' : 'border-white/[0.03] opacity-50'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-white font-semibold text-sm">{task.title}</p>
+                      {task.description && <p className="text-white/35 text-xs mt-0.5">{task.description}</p>}
+                      <div className="flex gap-3 mt-1">
+                        {task.suggested_amount && <span className="text-[#4AFFD4] text-xs">{task.suggested_amount} {currency}</span>}
+                        {task.min_amount && !task.suggested_amount && <span className="text-white/30 text-xs">min {task.min_amount} {currency}</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button onClick={() => toggleActive(task.id, task.is_active)} className={`w-10 h-5 rounded-full transition-colors ${task.is_active ? 'bg-[#4AFFD4]' : 'bg-white/10'}`}><div className={`w-4 h-4 bg-white rounded-full transition-transform mx-0.5 ${task.is_active ? 'translate-x-5' : 'translate-x-0'}`} /></button>
+                      <button onClick={() => deleteTask(task.id)} className="text-white/20 hover:text-red-400 transition text-sm">✕</button>
+                    </div>
                   </div>
-                  {task.description && <p className="text-white/40 text-sm mt-0.5">{task.description}</p>}
-                  <p className="text-[#4AFFD4]/60 text-sm mt-1">
-                    {task.suggested_amount
-                      ? `${task.suggested_amount} ${creator?.currency?.toUpperCase() ?? "RON"} fixed`
-                      : task.min_amount && task.min_amount > 1
-                      ? `min. ${task.min_amount} ${creator?.currency?.toUpperCase() ?? "RON"}`
-                      : 'Viewer decides'}
-                  </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => toggleTask(task)}
-                    className={`w-10 h-6 rounded-full transition ${task.is_active ? 'bg-[#4AFFD4]' : 'bg-white/10'}`}
-                  >
-                    <div className={`w-4 h-4 bg-white rounded-full mx-auto transition-transform shadow-sm ${task.is_active ? 'translate-x-2' : '-translate-x-1'}`} />
-                  </button>
-                  <button
-                    onClick={() => deleteTask(task.id)}
-                    className="text-white/15 hover:text-red-400 transition text-lg px-1"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </main>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+      <BottomNav />
+    </>
   )
 }

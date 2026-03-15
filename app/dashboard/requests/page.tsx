@@ -1,544 +1,127 @@
 'use client'
-
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import type { Creator, TaskRequest } from '@/types'
-
-function getRequestType(req: TaskRequest): 'task' | 'custom' | 'tip' {
-  if (req.custom_task_text) return 'custom'
-  if (req.task_id) return 'task'
-  return 'tip'
-}
-
-const TYPE_CONFIG = {
-  task: {
-    icon: '🎯', label: 'Task request',
-    pendingBorder: 'border-blue-500/20', pendingBg: 'bg-blue-500/[0.06]',
-    acceptedBorder: 'border-blue-500/10', acceptedBg: 'bg-blue-500/[0.04]',
-    dot: 'bg-blue-400', badge: 'bg-blue-500/10 text-blue-400',
-  },
-  custom: {
-    icon: '✏️', label: 'Custom request',
-    pendingBorder: 'border-purple-500/20', pendingBg: 'bg-purple-500/[0.06]',
-    acceptedBorder: 'border-purple-500/10', acceptedBg: 'bg-purple-500/[0.04]',
-    dot: 'bg-purple-400', badge: 'bg-purple-500/10 text-purple-400',
-  },
-  tip: {
-    icon: '💸', label: 'Tip',
-    pendingBorder: 'border-amber-500/20', pendingBg: 'bg-amber-500/[0.06]',
-    acceptedBorder: 'border-amber-500/10', acceptedBg: 'bg-amber-500/[0.04]',
-    dot: 'bg-amber-400', badge: 'bg-amber-500/10 text-amber-400',
-  },
-}
+import { TopNav, BackButton, BottomNav } from '@/components/nav'
 
 export default function RequestsPage() {
   const router = useRouter()
-  const [creator, setCreator] = useState<Creator | null>(null)
-  const [pending, setPending] = useState<TaskRequest[]>([])
-  const [accepted, setAccepted] = useState<TaskRequest[]>([])
-  const [done, setDone] = useState<TaskRequest[]>([])
+  const [profile, setProfile] = useState<any>(null)
+  const [session, setSession] = useState<any>(null)
+  const [pending, setPending] = useState<any[]>([])
+  const [accepted, setAccepted] = useState<any[]>([])
+  const [done, setDone] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState<string | null>(null)
-  const [extendConfirm, setExtendConfirm] = useState<{ id: string, amount: number } | null>(null)
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/auth/login'); return }
-
-      const { data: creatorData } = await supabase
-        .from('creators').select('*').eq('id', user.id).single()
-      setCreator(creatorData)
-
-      const { data: sessionData } = await supabase
-        .from('sessions')
-        .select('id')
-        .eq('creator_id', user.id)
-        .eq('is_active', true)
-        .single()
-
-      const { data } = await supabase
-        .from('task_requests').select('*, tasks(*)')
-        .eq('creator_id', user.id)
-        .in('status', ['pending', 'accepted'])
-        .eq('session_id', sessionData?.id ?? '')
-        .order('created_at', { ascending: true })
-
-      const now = new Date()
-      setPending((data || []).filter(r =>
-        r.status === 'pending' &&
-        new Date(r.expires_at) > now
-      ))
-      setAccepted((data || []).filter(r => r.status === 'accepted'))
-
-      if (sessionData) {
-        const { data: doneData } = await supabase
-          .from('task_requests').select('*, tasks(*)')
-          .eq('creator_id', user.id)
-          .eq('session_id', sessionData.id)
-          .in('status', ['completed', 'declined', 'refunded'])
-          .order('created_at', { ascending: false })
-          .limit(20)
-        setDone(doneData || [])
-      }
-
+      const { data: p } = await supabase.from('users').select('*').eq('id', user.id).single()
+      if (!p) { router.push('/auth/login'); return }
+      setProfile(p)
+      const { data: s } = await supabase.from('sessions').select('*').eq('user_id', user.id).eq('is_active', true).single()
+      setSession(s ?? null)
+      if (!s) { setLoading(false); return }
+      await loadRequests(s.id)
       setLoading(false)
-
-      const channel = supabase.channel('requests')
-        .on('postgres_changes', {
-          event: 'INSERT', schema: 'public', table: 'task_requests',
-          filter: `creator_id=eq.${user.id}`,
-        }, (payload) => {
-          const req = payload.new as TaskRequest
-          if (req.status === 'draft') return
-          if (req.status === 'accepted') {
-            setAccepted(prev => [req, ...prev])
-          } else if (req.status === 'pending' && new Date(req.expires_at) > new Date()) {
-            setPending(prev => [...prev, req])
-          }
-        })
-        .on('postgres_changes', {
-          event: 'UPDATE', schema: 'public', table: 'task_requests',
-          filter: `creator_id=eq.${user.id}`,
-        }, (payload) => {
-          const updated = payload.new as TaskRequest
-
-          if (updated.status === 'pending') {
-            setPending(prev => {
-              const exists = prev.find(r => r.id === updated.id)
-              if (exists) return prev.map(r => r.id === updated.id ? { ...r, ...updated } : r)
-              if (new Date(updated.expires_at) > new Date()) {
-                return [...prev, updated]
-              }
-              return prev
-            })
-            return
-          }
-
-          setPending(prev => prev.filter(r => r.id !== updated.id))
-          setAccepted(prev => prev.filter(r => r.id !== updated.id))
-
-          if (updated.status === 'accepted') {
-            setAccepted(prev => [updated, ...prev])
-          } else if (updated.status === 'completed' || updated.status === 'declined' || updated.status === 'refunded') {
-            setDone(prev => {
-              const exists = prev.find(r => r.id === updated.id)
-              if (exists) return prev.map(r => r.id === updated.id ? updated : r)
-              return [updated, ...prev]
-            })
-          }
-        })
+      const channel = supabase.channel('requests-' + user.id)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'task_requests', filter: `receiver_id=eq.${user.id}` }, async () => { if (s) await loadRequests(s.id) })
         .subscribe()
-
       return () => { supabase.removeChannel(channel) }
     }
     load()
   }, [router])
 
-  async function respond(requestId: string, action: 'accept' | 'decline') {
-    if (!creator) return
-    setActing(requestId + action)
-    try {
-      const res = await fetch('/api/payments/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_request_id: requestId, action, creator_id: creator.id })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      const req = pending.find(r => r.id === requestId)
-      if (req) {
-        setPending(prev => prev.filter(r => r.id !== requestId))
-        if (action === 'decline') {
-          setDone(prev => [{ ...req, status: 'declined' }, ...prev])
-        } else {
-          setAccepted(prev => [{ ...req, status: 'accepted' }, ...prev])
-        }
-      }
-    } catch (err: any) {
-      alert(err.message)
-    } finally {
-      setActing(null)
+  async function loadRequests(sessionId: string) {
+    const { data } = await supabase.from('task_requests').select('*, tasks(title)').eq('session_id', sessionId).order('created_at', { ascending: false })
+    if (data) {
+      setPending(data.filter(r => r.status === 'pending'))
+      setAccepted(data.filter(r => r.status === 'accepted'))
+      setDone(data.filter(r => ['completed','declined','refunded'].includes(r.status)))
     }
   }
 
-  async function complete(requestId: string) {
-    if (!creator) return
-    setActing(requestId + 'complete')
-    try {
-      const res = await fetch('/api/payments/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_request_id: requestId, creator_id: creator.id })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      const req = accepted.find(r => r.id === requestId)
-      if (req) {
-        setAccepted(prev => prev.filter(r => r.id !== requestId))
-        setDone(prev => [{ ...req, status: 'completed' }, ...prev])
-      }
-    } catch (err: any) {
-      alert(err.message)
-    } finally {
-      setActing(null)
-    }
+  async function respond(id: string, action: 'accept' | 'decline') {
+    setActing(id)
+    await fetch('/api/payments/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_request_id: id, action }) })
+    setActing(null)
   }
 
-  async function refund(requestId: string) {
-    if (!creator) return
-    if (!confirm('Refund this? The viewer will not be charged.')) return
-    setActing(requestId + 'refund')
-    try {
-      const res = await fetch('/api/payments/refund', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_request_id: requestId, creator_id: creator.id })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      const req = accepted.find(r => r.id === requestId)
-      if (req) {
-        setAccepted(prev => prev.filter(r => r.id !== requestId))
-        setDone(prev => [{ ...req, status: 'refunded' }, ...prev])
-      }
-    } catch (err: any) {
-      alert(err.message)
-    } finally {
-      setActing(null)
-    }
+  async function complete(id: string) {
+    setActing(id)
+    await fetch('/api/payments/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_request_id: id }) })
+    setActing(null)
   }
 
-  async function confirmExtend() {
-    if (!creator || !extendConfirm) return
-    const requestId = extendConfirm.id
-    setExtendConfirm(null)
-    setActing(requestId + 'extend')
-    try {
-      const res = await fetch('/api/payments/extend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_request_id: requestId, creator_id: creator.id })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      setPending(prev => prev.map(r => r.id === requestId ? { ...r, expires_at: data.new_expiry } : r))
-    } catch (err: any) {
-      alert(err.message)
-    } finally {
-      setActing(null)
-    }
-  }
+  const currency = profile?.currency?.toUpperCase() ?? 'RON'
 
-  async function dismissTip(requestId: string) {
-    if (!creator) return
-    await supabase.from('task_requests')
-      .update({ status: 'completed', completed_at: new Date().toISOString() })
-      .eq('id', requestId)
-    const req = accepted.find(r => r.id === requestId)
-    if (req) {
-      setAccepted(prev => prev.filter(r => r.id !== requestId))
-      setDone(prev => [{ ...req, status: 'completed' }, ...prev])
-    }
-  }
-
-  function getTaskLabel(req: TaskRequest) {
-    if (req.tasks?.title) return req.tasks.title
-    if (req.custom_task_text) return req.custom_task_text
-    if (req.task_id) return 'Task request'
-    return 'Free tip'
-  }
-
-  function timeLeft(expiresAt: string) {
-    const diff = new Date(expiresAt).getTime() - Date.now()
-    if (diff <= 0) return 'Expired'
-    const mins = Math.floor(diff / 60000)
-    const secs = Math.floor((diff % 60000) / 1000)
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-
-  const [, forceUpdate] = useState(0)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      forceUpdate(n => n + 1)
-      const now = new Date()
-      setPending(prev => {
-        const expired = prev.filter(r => new Date(r.expires_at) <= now)
-        if (expired.length > 0) {
-          setDone(d => {
-            const newExpired = expired.filter(e => !d.find(x => x.id === e.id))
-            return newExpired.length > 0 ? [...newExpired.map(r => ({ ...r, status: 'expired' as any })), ...d] : d
-          })
-          return prev.filter(r => new Date(r.expires_at) > now)
-        }
-        return prev
-      })
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [])
-
-  if (loading) return (
-    <main className="min-h-screen bg-[#08080C] flex items-center justify-center">
-      <div className="w-6 h-6 border-2 border-white/[0.08] border-t-[#4AFFD4] rounded-full animate-spin" />
-    </main>
-  )
-
-  const pendingEarnings = accepted
-    .filter(r => getRequestType(r) !== 'tip')
-    .reduce((sum, r) => sum + (r.amount || 0), 0)
-
-  const hasAnything = pending.length > 0 || accepted.length > 0 || done.length > 0
-
-  return (
-    <main className="min-h-screen bg-[#08080C] p-6">
-      <div className="max-w-2xl mx-auto">
-
-        <div className="flex items-center gap-4 mb-6">
-          <button onClick={() => router.push('/dashboard/live')}
-            className="text-white/30 hover:text-white/60 transition text-sm">← Live</button>
-          <h1 className="text-xl font-bold text-white">Requests</h1>
-          {pending.length > 0 && (
-            <span className="bg-[#4AFFD4] text-[#08080C] text-xs font-bold px-2 py-0.5 rounded-full">
-              {pending.length}
-            </span>
-          )}
-          {pendingEarnings > 0 && (
-            <span className="ml-auto text-sm text-white/30">
-              <span className="text-[#4AFFD4] font-semibold">{pendingEarnings} {creator?.currency?.toUpperCase() ?? 'RON'}</span> pending capture
-            </span>
-          )}
+  const Card = ({ req, showActions }: { req: any, showActions: boolean }) => {
+    const isCustom = !!req.custom_task_text
+    const label = req.tasks?.title || req.custom_task_text || 'Request'
+    return (
+      <div className={`rounded-2xl border p-4 ${showActions ? 'border-[#4AFFD4]/20 bg-[#4AFFD4]/[0.04]' : 'border-white/[0.06] bg-[#111117]'}`}>
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <div className="flex items-center gap-2 min-w-0"><span>{isCustom ? '✏️' : '🎯'}</span><div className="min-w-0"><p className="font-semibold text-white text-sm truncate">{label}</p><p className="text-white/40 text-xs">by {req.sender_name}</p></div></div>
+          <p className="text-white font-bold shrink-0">{req.amount} {currency}</p>
         </div>
-
-        {/* Pending */}
-        {pending.length > 0 && (
-          <div className="mb-6">
-            <p className="text-white/20 text-xs uppercase tracking-widest mb-3">Needs response</p>
-            <div className="space-y-3">
-              {pending.map(req => {
-                const type = getRequestType(req)
-                const cfg = TYPE_CONFIG[type]
-                const expiring = new Date(req.expires_at).getTime() - Date.now() < 60000
-                return (
-                  <div key={req.id} className={`rounded-2xl p-4 border ${cfg.pendingBorder} ${cfg.pendingBg}`}>
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cfg.badge}`}>
-                            {cfg.icon} {cfg.label}
-                          </span>
-                        </div>
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-bold text-xl text-white">{req.amount} {req.currency}</span>
-                          <span className="text-white/40 text-sm">from {req.requester_name}</span>
-                        </div>
-                        <p className="text-white font-medium mt-1">{getTaskLabel(req)}</p>
-                        {req.message && <p className="text-white/40 text-sm mt-1 italic">"{req.message}"</p>}
-                      </div>
-                      <div className="text-right ml-4 shrink-0">
-                        <p className="text-white/20 text-xs mb-1">expires in</p>
-                        <p className={`font-mono text-sm font-bold ${expiring ? 'text-red-400' : 'text-white/40'}`}>
-                          {timeLeft(req.expires_at)}
-                        </p>
-                        <button onClick={() => setExtendConfirm({ id: req.id, amount: req.amount })} disabled={!!acting}
-                          className="mt-1.5 px-2.5 py-1 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] text-amber-400 text-xs font-semibold hover:border-amber-500/30 transition disabled:opacity-30 block w-full text-center">
-                          {acting === req.id + 'extend' ? '...' : '⏱ +5m'}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => respond(req.id, 'accept')} disabled={!!acting}
-                        className="flex-1 bg-[#4AFFD4] text-[#08080C] py-2.5 rounded-xl font-bold text-sm hover:bg-[#6FFFDF] transition disabled:opacity-50">
-                        {acting === req.id + 'accept' ? '...' : '✓ Accept'}
-                      </button>
-                      <button onClick={() => respond(req.id, 'decline')} disabled={!!acting}
-                        className="flex-1 border border-white/[0.08] text-white/40 py-2.5 rounded-xl text-sm hover:border-white/15 hover:text-white/60 transition disabled:opacity-50">
-                        {acting === req.id + 'decline' ? '...' : '✕ Decline'}
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+        {req.message && <p className="text-white/35 text-xs italic mb-3">"{req.message}"</p>}
+        {showActions && (
+          <div className="flex gap-2 mt-3">
+            <button onClick={() => respond(req.id, 'accept')} disabled={acting === req.id} className="flex-1 bg-[#4AFFD4] text-[#08080C] py-2 rounded-xl text-sm font-bold hover:bg-[#6FFFDF] transition disabled:opacity-50">Accept</button>
+            <button onClick={() => respond(req.id, 'decline')} disabled={acting === req.id} className="flex-1 border border-red-500/20 text-red-400 py-2 rounded-xl text-sm hover:bg-red-500/[0.06] transition disabled:opacity-50">Decline</button>
           </div>
         )}
-
-        {/* In Progress */}
-        {accepted.filter(r => getRequestType(r) !== 'tip').length > 0 && (
-          <div className="mb-6">
-            <p className="text-white/20 text-xs uppercase tracking-widest mb-3">In progress</p>
-            <div className="space-y-3">
-              {accepted.filter(r => getRequestType(r) !== 'tip').map(req => {
-                const type = getRequestType(req)
-                const cfg = TYPE_CONFIG[type]
-                return (
-                  <div key={req.id} className={`rounded-2xl p-4 border ${cfg.acceptedBorder} ${cfg.acceptedBg}`}>
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${cfg.dot}`} />
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cfg.badge}`}>
-                            {cfg.icon} {cfg.label}
-                          </span>
-                        </div>
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-bold text-xl text-white">{req.amount} {req.currency}</span>
-                          <span className="text-white/40 text-sm">from {req.requester_name}</span>
-                        </div>
-                        <p className="text-white font-medium mt-1">{getTaskLabel(req)}</p>
-                        {req.message && <p className="text-white/40 text-sm mt-1 italic">"{req.message}"</p>}
-                        {req.extensions && req.extensions.length > 0 && (
-                          <p className="text-amber-400 text-xs mt-1">
-                            ⏱ Extended {req.extensions.length}× (+{req.extensions.length * 5}min)
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => complete(req.id)} disabled={!!acting}
-                        className="flex-1 bg-[#4AFFD4] text-[#08080C] py-2.5 rounded-xl font-bold text-sm hover:bg-[#6FFFDF] transition disabled:opacity-50">
-                        {acting === req.id + 'complete' ? '...' : `✓ Done — charge ${req.amount} ${req.currency}`}
-                      </button>
-                      <button onClick={() => refund(req.id)} disabled={!!acting}
-                        className="border border-white/[0.08] text-white/30 px-4 py-2.5 rounded-xl text-sm hover:border-white/15 hover:text-white/50 transition disabled:opacity-50">
-                        {acting === req.id + 'refund' ? '...' : '↩'}
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Tips */}
-        {accepted.filter(r => getRequestType(r) === 'tip').length > 0 && (
-          <div className="mb-6">
-            <p className="text-white/20 text-xs uppercase tracking-widest mb-3">Tips received</p>
-            <div className="space-y-2">
-              {accepted.filter(r => getRequestType(r) === 'tip').map(req => (
-                <div key={req.id} className="rounded-xl px-4 py-3 border border-amber-500/15 bg-amber-500/[0.05] flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-amber-400 text-base shrink-0">💸</span>
-                    <div className="min-w-0">
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-bold text-white">{req.amount} {req.currency}</span>
-                        <span className="text-white/40 text-sm truncate">from {req.requester_name}</span>
-                      </div>
-                      {req.message && (
-                        <p className="text-white/25 text-xs truncate mt-0.5 italic">"{req.message}"</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0 ml-3">
-                    <span className="text-[#4AFFD4] text-xs font-medium">✓ Charged</span>
-                    <button onClick={() => dismissTip(req.id)}
-                      className="text-white/25 text-xs hover:text-white/50 transition px-2 py-1 border border-white/[0.06] rounded-lg">
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* History */}
-        {done.length > 0 && (
-          <div className="mb-6">
-            <p className="text-white/20 text-xs uppercase tracking-widest mb-3">Session history</p>
-            <div className="space-y-3">
-              {done.map(req => {
-                const type = getRequestType(req)
-                const cfg = TYPE_CONFIG[type]
-                const isDeclined = req.status === 'declined' || req.status === 'refunded' || req.status === 'expired'
-                return (
-                  <div key={req.id} className={`rounded-2xl px-4 py-3 border flex items-center justify-between gap-3 ${
-                    isDeclined ? 'border-red-500/10 bg-red-500/[0.04]' : 'border-[#4AFFD4]/10 bg-[#4AFFD4]/[0.04]'
-                  }`}>
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className={`text-lg shrink-0 ${isDeclined ? 'opacity-30' : ''}`}>{cfg.icon}</span>
-                      <div className="min-w-0">
-                        <div className="flex items-baseline gap-2">
-                          <span className={`font-bold text-lg ${isDeclined ? 'text-white/20 line-through' : 'text-white'}`}>
-                            {req.amount} {req.currency}
-                          </span>
-                          <span className="text-white/35 text-sm truncate">{req.requester_name}</span>
-                        </div>
-                        <p className="text-white/25 text-xs truncate mt-0.5">{getTaskLabel(req)}</p>
-                        {req.status === 'completed' && req.platform_fee != null && (
-                          <div className="flex items-center gap-2 mt-1 flex-wrap">
-                            <span className="text-[#4AFFD4] text-xs font-semibold">
-                              You receive: {Math.round((req.amount - req.platform_fee) * 100) / 100} {req.currency}
-                            </span>
-                            <span className="text-white/20 text-xs">
-                              −{req.platform_fee} fee
-                              {req.extensions && req.extensions.length > 0 && (
-                                <> · {req.extensions.length}× extended</>
-                              )}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <span className={`text-xs font-bold px-3 py-1 rounded-full shrink-0 ${
-                      isDeclined
-                        ? 'bg-red-500/10 text-red-400'
-                        : 'bg-[#4AFFD4]/10 text-[#4AFFD4]'
-                    }`}>
-                      {req.status === 'completed' ? '✓ Done' : req.status === 'refunded' ? '↩ Refunded' : req.status === 'expired' ? '⏱ Expired' : '✕ Declined'}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {!hasAnything && (
-          <div className="text-center py-24">
-            <p className="text-4xl mb-4">👀</p>
-            <p className="text-white/25">Waiting for requests...</p>
-            <p className="text-white/10 text-sm mt-1">New requests appear here instantly</p>
-          </div>
+        {!showActions && req.status === 'accepted' && (
+          <button onClick={() => complete(req.id)} disabled={acting === req.id} className="w-full mt-3 bg-white/[0.07] hover:bg-white/[0.10] text-white py-2 rounded-xl text-sm font-semibold transition disabled:opacity-50">✓ Mark done</button>
         )}
       </div>
+    )
+  }
 
-      {/* Extend confirm modal */}
-      {extendConfirm && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <div className="bg-[#111117] border border-white/[0.08] rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
-            <div className="text-center">
-              <p className="text-3xl mb-3">⏱</p>
-              <h2 className="text-lg font-bold text-white">Extend acceptance time</h2>
-              <p className="text-white/40 text-sm mt-1">Give yourself 5 more minutes to decide</p>
-            </div>
-            <div className="bg-[#08080C] rounded-xl p-4 space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-white/40">Extension time</span>
-                <span className="font-semibold text-white">+5 minutes</span>
-              </div>
-              <div className="flex justify-between border-t border-white/[0.06] pt-2">
-                <span className="text-white/40">Platform fee (10%)</span>
-                <span className="font-semibold text-amber-400">
-                  {Math.round(extendConfirm.amount * 0.10 * 100) / 100} {creator?.currency?.toUpperCase() ?? 'RON'}
-                </span>
-              </div>
-              <p className="text-white/20 text-xs pt-1">Deducted from your payout when the task is completed</p>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setExtendConfirm(null)}
-                className="flex-1 border border-white/[0.08] text-white/40 py-3 rounded-xl text-sm hover:border-white/15 transition">
-                Cancel
-              </button>
-              <button onClick={confirmExtend}
-                className="flex-1 bg-amber-400 text-black py-3 rounded-xl text-sm font-bold hover:bg-amber-300 transition">
-                Extend +5 min
-              </button>
-            </div>
+  if (loading) return (<><TopNav /><main className="min-h-screen bg-[#08080C] flex items-center justify-center pt-14"><div className="w-5 h-5 border-2 border-white/[0.08] border-t-[#4AFFD4] rounded-full animate-spin" /></main></>)
+
+  return (
+    <>
+      <TopNav />
+      <main className="min-h-screen bg-[#08080C] pt-14 pb-24">
+        <div className="max-w-2xl mx-auto p-6">
+          <div className="flex items-center gap-4 mb-6">
+            <BackButton href="/dashboard" />
+            <h1 className="text-2xl font-bold text-white">Requests</h1>
+            {session && <div className="ml-auto flex items-center gap-1.5 bg-[#4AFFD4]/[0.08] border border-[#4AFFD4]/20 px-3 py-1 rounded-full"><span className="w-1.5 h-1.5 bg-[#4AFFD4] rounded-full animate-pulse" /><span className="text-[#4AFFD4] text-xs font-semibold">Live</span></div>}
           </div>
+          {!session ? (
+            <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-8 text-center">
+              <p className="text-white/40 text-sm">No active session</p>
+              <button onClick={() => router.push('/dashboard/live')} className="mt-4 bg-[#4AFFD4] text-[#08080C] px-6 py-2.5 rounded-xl font-bold text-sm hover:bg-[#6FFFDF] transition">Start session →</button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-center gap-2 mb-3"><h2 className="text-white/60 text-xs font-semibold uppercase tracking-widest">Pending</h2>{pending.length > 0 && <span className="bg-amber-500/20 text-amber-400 text-xs px-2 py-0.5 rounded-full font-bold">{pending.length}</span>}</div>
+                {pending.length === 0 ? <p className="text-white/20 text-sm">No pending requests</p> : <div className="space-y-3">{pending.map(r => <Card key={r.id} req={r} showActions={true} />)}</div>}
+              </div>
+              {accepted.length > 0 && (<div><h2 className="text-white/60 text-xs font-semibold uppercase tracking-widest mb-3">In Progress</h2><div className="space-y-3">{accepted.map(r => <Card key={r.id} req={r} showActions={false} />)}</div></div>)}
+              {done.length > 0 && (
+                <div>
+                  <h2 className="text-white/60 text-xs font-semibold uppercase tracking-widest mb-3">Done</h2>
+                  <div className="space-y-2">
+                    {done.slice(0, 10).map(r => (
+                      <div key={r.id} className="flex items-center justify-between px-4 py-3 bg-[#111117] border border-white/[0.04] rounded-xl">
+                        <div className="flex items-center gap-2 min-w-0"><span>{r.custom_task_text ? '✏️' : '🎯'}</span><span className="text-white/40 text-sm truncate">{r.tasks?.title || r.custom_task_text}</span></div>
+                        <div className="flex items-center gap-2 shrink-0"><span className="text-white/50 text-sm">{r.amount} {currency}</span><span className={`text-xs px-2 py-0.5 rounded-full ${r.status === 'completed' ? 'bg-[#4AFFD4]/10 text-[#4AFFD4]' : r.status === 'declined' ? 'bg-red-500/10 text-red-400' : 'bg-white/[0.06] text-white/30'}`}>{r.status}</span></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
-    </main>
+      </main>
+      <BottomNav />
+    </>
   )
 }
