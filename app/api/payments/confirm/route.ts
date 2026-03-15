@@ -1,47 +1,47 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseAdmin } from '@/lib/supabase'
+import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 
-export async function POST(req: NextRequest) {
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
+
+export async function POST(req: Request) {
   try {
     const { task_request_id } = await req.json()
 
-    if (!task_request_id)
+    if (!task_request_id) {
       return NextResponse.json({ error: 'Missing task_request_id' }, { status: 400 })
+    }
 
-    const supabase = getSupabaseAdmin()
-
-    const { data: request } = await supabase
+    // Fetch full record from DB
+    const { data: request, error } = await supabase
       .from('task_requests')
-      .select('status, task_id, custom_task_text')
+      .select('*')
       .eq('id', task_request_id)
       .single()
 
-    if (!request)
+    if (error || !request) {
       return NextResponse.json({ error: 'Request not found' }, { status: 404 })
-
-    // Only update if still in draft (idempotent)
-    if (request.status !== 'draft') {
-      return NextResponse.json({ status: request.status })
     }
 
-    // Free tip = no task_id and no custom_task_text
+    // Determine type from DB fields (never trust client-side)
     const isFreeTip = !request.task_id && !request.custom_task_text
     const newStatus = isFreeTip ? 'accepted' : 'pending'
 
-    const { error } = await supabase
+    const { error: updateError } = await supabase
       .from('task_requests')
-      .update({
-        status: newStatus,
-        responded_at: isFreeTip ? new Date().toISOString() : null,
-      })
+      .update({ status: newStatus })
       .eq('id', task_request_id)
+      .eq('status', 'draft') // only update if still draft
 
-    if (error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 })
+    }
 
-    return NextResponse.json({ status: newStatus })
-
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ success: true, status: newStatus })
+  } catch (err) {
+    console.error('Confirm error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
