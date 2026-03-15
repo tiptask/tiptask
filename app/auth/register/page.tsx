@@ -111,7 +111,7 @@ function RegisterForm() {
             <div>
               <label className="block text-sm font-medium text-white/60 mb-1.5">Username</label>
               <div className="relative">
-                <span className="absolute left-4 top-3 text-white/20 text-sm">tiptask.io/</span>
+                <span className="absolute left-4 top-3 text-white/20 text-sm">tiptask.me/</span>
                 <input type="text" value={username} onChange={e => setUsername(e.target.value.replace(/[^a-z0-9_]/g, ''))} required
                   className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl pl-24 pr-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/50 transition"
                   placeholder="djshadow" />

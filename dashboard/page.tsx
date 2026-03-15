@@ -147,7 +147,7 @@ export default function DashboardPage() {
             Welcome, {creator?.display_name} 👋
           </h1>
           <p className="text-white/30 text-sm mt-1">
-            tiptask.io/{creator?.username}
+            tiptask.me/{creator?.username}
           </p>
         </div>
 

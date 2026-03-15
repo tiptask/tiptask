@@ -72,7 +72,7 @@ export default function RegisterPage() {
           <div>
             <label className="block text-sm text-gray-400 mb-1">Username</label>
             <div className="relative">
-              <span className="absolute left-4 top-3 text-gray-500">tiptask.io/</span>
+              <span className="absolute left-4 top-3 text-gray-500">tiptask.me/</span>
               <input type="text" value={username} onChange={e => setUsername(e.target.value.replace(/[^a-z0-9_]/g, ''))} required
                 className="w-full bg-gray-900 border border-gray-700 rounded-xl pl-24 pr-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-white transition"
                 placeholder="djshadow" />
