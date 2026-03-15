@@ -20,9 +20,11 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
   const [creator, setCreator] = useState<Creator | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [fan, setFan] = useState<any>(null)
+  const [isFollowing, setIsFollowing] = useState(false)
+  const [followLoading, setFollowLoading] = useState(false)
 
   useEffect(() => {
-    // Store referral code so it persists to register even if user navigates away
     if (typeof window !== 'undefined') {
       localStorage.setItem('tiptask_ref', params.username)
     }
@@ -41,10 +43,42 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
         router.replace(`/tip/${params.username}`)
         return
       }
+
+      // Check if logged in as fan
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: fanData } = await supabase.from('fans').select('*').eq('id', user.id).single()
+        if (fanData) {
+          setFan(fanData)
+          // Check if already following
+          const { data: follow } = await supabase.from('fan_follows')
+            .select('id').eq('fan_id', user.id).eq('creator_id', creatorData.id).single()
+          setIsFollowing(!!follow)
+        }
+      }
+
       setLoading(false)
     }
     load()
   }, [params.username, router])
+
+  async function handleFollow() {
+    if (!fan || !creator) return
+    setFollowLoading(true)
+    if (isFollowing) {
+      await supabase.from('fan_follows')
+        .delete().eq('fan_id', fan.id).eq('creator_id', creator.id)
+      setIsFollowing(false)
+    } else {
+      await supabase.from('fan_follows').insert({
+        fan_id: fan.id,
+        creator_id: creator.id,
+        notify_on_session_start: true,
+      })
+      setIsFollowing(true)
+    }
+    setFollowLoading(false)
+  }
 
   if (loading) return (
     <main className="min-h-screen bg-[#08080C] flex items-center justify-center">
@@ -66,13 +100,12 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
   const isLive = !!session
   const customLinks: { label: string; url: string }[] = c.custom_links ?? []
 
-  // Build social links list
   const socialLinks = Object.entries(SOCIAL_CONFIG)
     .filter(([key]) => c[key])
     .map(([key, cfg]) => {
       const handle = c[key] as string
       const url = key === 'website' ? handle : cfg.base + handle.replace('@', '')
-      const display = key === 'website' ? (handle.replace(/https?:\/\//, '').split('/')[0]) : handle.replace('@', '')
+      const display = key === 'website' ? handle.replace(/https?:\/\//, '').split('/')[0] : handle.replace('@', '')
       return { key, label: cfg.label, icon: cfg.icon, url, display }
     })
 
@@ -82,34 +115,49 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
 
       <div className="max-w-sm mx-auto px-5 pt-12 pb-20 relative z-10">
 
-        {/* TipTask wordmark */}
+        {/* Wordmark */}
         <div className="text-center mb-10">
           <Link href="/" className="text-xs font-bold text-white/15 hover:text-white/30 transition tracking-widest">
             TIP<span className="text-[#4AFFD4]/30">TASK</span>
           </Link>
         </div>
 
-        {/* Avatar + name + live badge */}
+        {/* Avatar + name + badges */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-20 h-20 rounded-full bg-[#4AFFD4]/10 border-2 border-[#4AFFD4]/20 flex items-center justify-center mb-4 text-2xl font-bold text-[#4AFFD4]">
             {creator.display_name[0].toUpperCase()}
           </div>
           <h1 className="text-xl font-bold text-white mb-0.5">{creator.display_name}</h1>
           <p className="text-white/30 text-sm mb-3">@{creator.username}</p>
-          {isLive ? (
-            <div className="flex items-center gap-1.5 bg-[#4AFFD4]/[0.08] border border-[#4AFFD4]/20 px-3 py-1 rounded-full">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4AFFD4] opacity-60" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#4AFFD4]" />
-              </span>
-              <span className="text-[#4AFFD4] text-xs font-semibold">Live now</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 bg-white/[0.04] border border-white/[0.05] px-3 py-1 rounded-full">
-              <span className="h-1.5 w-1.5 rounded-full bg-white/15" />
-              <span className="text-white/25 text-xs">Offline</span>
-            </div>
-          )}
+
+          <div className="flex items-center gap-2 flex-wrap justify-center">
+            {isLive ? (
+              <div className="flex items-center gap-1.5 bg-[#4AFFD4]/[0.08] border border-[#4AFFD4]/20 px-3 py-1 rounded-full">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4AFFD4] opacity-60" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#4AFFD4]" />
+                </span>
+                <span className="text-[#4AFFD4] text-xs font-semibold">Session active</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-white/[0.04] border border-white/[0.05] px-3 py-1 rounded-full">
+                <span className="h-1.5 w-1.5 rounded-full bg-white/15" />
+                <span className="text-white/25 text-xs">Offline · tips always open</span>
+              </div>
+            )}
+
+            {/* Follow button — only for logged-in fans */}
+            {fan && (
+              <button onClick={handleFollow} disabled={followLoading}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition border ${
+                  isFollowing
+                    ? 'bg-white/[0.06] border-white/[0.10] text-white/50 hover:border-red-500/30 hover:text-red-400'
+                    : 'bg-[#4AFFD4]/[0.08] border-[#4AFFD4]/20 text-[#4AFFD4] hover:bg-[#4AFFD4]/[0.14]'
+                } disabled:opacity-50`}>
+                {isFollowing ? '✓ Following' : '+ Follow'}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Bio */}
@@ -117,15 +165,13 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
           <p className="text-white/40 text-sm text-center leading-relaxed mb-7 px-2">{c.bio}</p>
         )}
 
-        {/* CTA — tip button. Passes referral code so new signups are attributed to this creator */}
-        {isLive && (
-          <Link href={`/tip/${creator.username}?ref=${creator.username}`}
-            className="flex items-center justify-center gap-2 w-full bg-[#4AFFD4] text-[#08080C] py-4 rounded-2xl font-extrabold text-base mb-4 hover:bg-[#6FFFDF] transition active:scale-[0.98]">
-            💸 Send a tip or request
-          </Link>
-        )}
+        {/* Tip CTA — always visible */}
+        <Link href={`/tip/${creator.username}?ref=${creator.username}`}
+          className="flex items-center justify-center gap-2 w-full bg-[#4AFFD4] text-[#08080C] py-4 rounded-2xl font-extrabold text-base mb-4 hover:bg-[#6FFFDF] transition active:scale-[0.98]">
+          {isLive ? '💸 Send a tip or request' : '💸 Send a tip'}
+        </Link>
 
-        {/* Social links — linktree style */}
+        {/* Social links */}
         {socialLinks.length > 0 && (
           <div className="flex flex-col gap-2.5 mb-2.5">
             {socialLinks.map(link => (
@@ -159,15 +205,29 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
           </div>
         )}
 
-        {/* Offline state */}
-        {!isLive && (
-          <div className="bg-[#111117] border border-white/[0.06] rounded-2xl px-6 py-5 text-center mt-3">
-            <p className="text-white/40 text-sm">Not live right now</p>
-            <p className="text-white/20 text-xs mt-1">Come back when {creator.display_name} goes live</p>
+        {/* Fan CTA — only for non-logged-in users */}
+        {!fan && (
+          <div className="mt-4 bg-[#111117] border border-white/[0.06] rounded-2xl px-5 py-4 flex items-center justify-between">
+            <div>
+              <p className="text-white/60 text-sm font-medium">New to TipTask?</p>
+              <p className="text-white/25 text-xs mt-0.5">Join free — follow creators, track history</p>
+            </div>
+            <Link href={`/fan/register?ref=${creator.username}`}
+              className="shrink-0 bg-white/[0.07] hover:bg-white/[0.10] border border-white/[0.08] text-white/60 hover:text-white text-xs font-semibold px-4 py-2 rounded-xl transition">
+              Join →
+            </Link>
           </div>
         )}
 
-        {/* Footer */}
+        {/* Fan signed in — link to dashboard */}
+        {fan && (
+          <div className="mt-4 text-center">
+            <Link href="/fan/dashboard" className="text-white/20 text-xs hover:text-white/40 transition">
+              ← My fan dashboard
+            </Link>
+          </div>
+        )}
+
         <div className="text-center mt-10">
           <p className="text-white/10 text-xs">
             Powered by <Link href="/" className="text-white/20 hover:text-white/30 transition">TipTask</Link>
