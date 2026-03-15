@@ -192,6 +192,7 @@ export default function DashboardPage() {
             { href: '/dashboard/live', icon: '🔴', label: 'Session', sub: session ? 'Active' : 'Start one' },
             { href: '/dashboard/requests', icon: '🎯', label: 'Requests', sub: pendingRequests.length > 0 ? `${pendingRequests.length} pending` : 'Manage' },
             { href: '/dashboard/tips', icon: '💸', label: 'Tips', sub: 'Live feed' },
+            { href: '/dashboard/sessions', icon: '📊', label: 'Sessions', sub: 'Stats & history' },
             { href: '/dashboard/tasks', icon: '📋', label: 'Tasks', sub: 'Manage list' },
             { href: '/dashboard/payments', icon: '💳', label: 'Payments', sub: 'Stripe' },
             { href: '/dashboard/referrals', icon: '🔗', label: 'Referrals', sub: 'Earn 5%' },
