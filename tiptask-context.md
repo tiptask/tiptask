@@ -1,5 +1,5 @@
 # TipTask — Project Context
-_Last updated: 2026-03-15 | Git tag: `pre-redesign-v1`_
+_Last updated: 2026-03-15 | Git tag: `redesign-v1`_
 
 ---
 
@@ -19,6 +19,7 @@ cd ~/Documents/tiptask && stripe listen --forward-to localhost:3002/api/webhooks
 - **Frontend/Backend:** Next.js 15 (App Router)
 - **Database:** Supabase (Postgres + RLS + Realtime)
 - **Payments:** Stripe Connect (manual capture for requests, automatic for tips)
+- **Email:** Resend (fan notifications)
 - **Styling:** Tailwind v4 + Arctic dark theme
 - **Font:** Plus Jakarta Sans
 - **QR:** react-qr-code
@@ -46,30 +47,27 @@ cd ~/Documents/tiptask && stripe listen --forward-to localhost:3002/api/webhooks
 | `best-working-version` | First stable baseline |
 | `profile-referral-v1` | Arctic theme + profile pages + referral system |
 | `requests-fix-v1` | Requests correctly appear after payment confirmed |
-| `obs-profile-v1` | OBS overlay + linktree profile + auto referral + tip session rename |
-| `pre-redesign-v1` | Last stable before major Tips/Requests separation redesign ← CURRENT |
+| `obs-profile-v1` | OBS overlay + linktree profile + auto referral |
+| `pre-redesign-v1` | Last stable before major redesign |
+| `redesign-v1` | Tips/requests separated + fan system + notifications ← CURRENT |
 
 ---
 
-## ⚠️ MAJOR REDESIGN PLANNED — Architecture Below
-
----
-
-## Core Concept After Redesign
+## Core Concept
 
 ### Tips vs Requests — Fully Separated
 
 **TIPS**
 - Always available, no session needed
-- Creator QR/link is permanently active for tips
+- Creator QR/link permanently active for tips
 - Automatic Stripe capture
-- Anonymous or fan tippers
+- Stored in `tips` table
 - Tracked separately from requests everywhere
 
 **REQUESTS**
 - Session-based only (creator must start a session)
 - Manual Stripe capture (held until creator completes)
-- Show in creator dashboard during active session
+- Stored in `task_requests` table
 - Tracked separately from tips everywhere
 
 ---
@@ -77,68 +75,49 @@ cd ~/Documents/tiptask && stripe listen --forward-to localhost:3002/api/webhooks
 ## User Types
 
 ### Creator
-- Has a permanent profile page at `tiptask.me/[username]`
-- Can start/end "Request Sessions" (tips always work regardless)
-- Sees tips and requests in separate sections of dashboard
-- Gets paid via Stripe Connect
+- Account at `/auth/register`
+- Profile page at `tiptask.me/[username]`
+- Starts/ends "Request Sessions" (tips always work regardless)
+- Paid via Stripe Connect
 
 ### Fan (registered tipper)
-- Optional account for tippers
-- Benefits vs anonymous:
-  - Saved payment methods
-  - Follow creators
-  - Push/email notifications when followed creator starts a session
-  - Full history of tips and requests across sessions
-  - Per-session contribution tracking
+- Account at `/fan/register`
+- Benefits: saved history, follow creators, session notifications
+- Dashboard at `/fan/dashboard`
 
 ### Anonymous tipper
 - No account needed
 - Can tip or send requests
-- No history after session ends
-- No notifications
+- No history tracking
 
 ---
 
-## Session Logic (Redesigned)
-
+## Session Logic
 ```
-Creator starts Request Session
-  ↓
-Session has start time + end time
-  ↓
-Tipper visits during Session A:
-  → contributions accumulate for Session A
-  → if same tipper visits while Session A still active = same session, counts continue
-  → if creator ends Session A and starts Session B = new session, tipper counts reset
-  ↓
-Tips are NEVER session-gated — always work
+Tips: ALWAYS work, no session required
+Requests: Only when creator has active session
+
+Session tracks:
+- total_tips_count, total_tips_amount
+- total_requests_count, total_requests_amount
+- unique_tippers_count
 ```
 
-**Session stats to track:**
-- Total tips received (count + amount)
-- Total requests received (count + amount)
-- Total earned (tips + completed requests)
-- Unique tippers
-- Per-tipper breakdown (for fans: named; for anonymous: by device/cookie)
+---
+
+## Auto-Referral
+Every page stores creator username in localStorage:
+```js
+localStorage.setItem('tiptask_ref', username)
+```
+Register pages read `?ref=` URL param first, fallback to localStorage.
+Applied on: profile page, tip page, success page.
 
 ---
 
-## Auto-Referral — Every Landing Point
+## Database Schema
 
-Every page a new user can land on must show "Join TipTask" with the creator auto-attributed as referrer:
-
-- `tiptask.me/[username]` — profile page
-- `tiptask.me/tip/[username]` — tip/request form
-- `tiptask.me/tip/[username]/success` — post-payment success page
-
-Implementation: `localStorage.setItem('tiptask_ref', username)` on every landing page.
-Register page reads `?ref=` URL param first, falls back to localStorage.
-
----
-
-## Database Schema (Current + Planned Changes)
-
-### creators (existing)
+### creators
 ```sql
 id, email, username, display_name, currency,
 bio, instagram, tiktok, youtube, twitch, website,
@@ -150,121 +129,176 @@ avatar_url, completion_rate, total_earned, total_requests,
 is_premium, premium_expires_at, created_at
 ```
 
-### sessions (existing — rename to request_sessions conceptually)
+### sessions
 ```sql
 id, creator_id, title, is_active,
-show_tasks, allow_custom_tasks,
--- REMOVE: allow_free_tips, free_tip_min_amount (tips always on now)
-use_landing_page,
+show_tasks, allow_custom_tasks, allow_free_tips,
+free_tip_min_amount, use_landing_page,
+total_tips_count, total_tips_amount,
+total_requests_count, total_requests_amount,
+unique_tippers_count,
 started_at, ended_at
--- ADD: total_tips_count, total_tips_amount
--- ADD: total_requests_count, total_requests_amount
--- ADD: unique_tippers_count
 ```
 
-### tasks (existing)
+### tasks
 ```sql
 id, creator_id, title, description,
 suggested_amount, min_amount, category,
 is_active, created_at
 ```
 
-### task_requests (existing — for REQUESTS only)
+### task_requests (REQUESTS only — no tips here)
 ```sql
 id, session_id, creator_id,
 task_id (nullable), custom_task_text (nullable), message,
-requester_name, fan_id (nullable, fk → fans),
+requester_name, fan_id (nullable),
 amount, currency,
 platform_fee, stripe_fee, total_charged,
 status (draft→pending→accepted→completed/declined/refunded),
 stripe_payment_intent_id, stripe_account_id,
 responded_at, completed_at, expires_at,
 created_at
+
+NOTE: is_free_tip is NO LONGER USED — tips go to tips table
 ```
 
-### tips (NEW TABLE — separate from task_requests)
+### tips (NEW — separate table)
 ```sql
 id, creator_id,
-session_id (nullable — tip can exist without session),
+session_id (nullable — tip works without session),
 fan_id (nullable),
 tipper_name, message,
 amount, currency,
 platform_fee, stripe_fee, total_charged,
-stripe_payment_intent_id,
-status (draft→completed),
+stripe_payment_intent_id, stripe_account_id,
+status (draft→completed→refunded),
 created_at
+
+REPLICA IDENTITY FULL set
 ```
 
-### fans (NEW TABLE)
+### fans (NEW)
 ```sql
 id, email, display_name,
-stripe_customer_id (for saved payment methods),
+stripe_customer_id,
 referred_by,
 created_at
 ```
 
-### fan_follows (NEW TABLE)
+### fan_follows (NEW)
 ```sql
 id, fan_id, creator_id,
-notify_on_session_start (boolean),
+notify_on_session_start (boolean default true),
 created_at
+UNIQUE(fan_id, creator_id)
 ```
 
-### referral_earnings (existing)
+### referral_earnings
 ```sql
 id, referrer_id, referred_id, task_request_id,
-transaction_amount, platform_fee, referral_cut (5% of fee),
+transaction_amount, platform_fee, referral_cut (5%),
 paid_out, paid_out_at, created_at
 ```
 
 ---
 
-## App Structure (After Redesign)
+## App Structure
 
 ```
 app/
-├── [username]/page.tsx             ← Linktree profile, always shows tip button
-│                                      Shows "Session active" badge if session running
-│                                      Shows "Join as Fan" for new users
+├── [username]/page.tsx             ← Linktree profile
+│                                      Follow button (fans only)
+│                                      "Join as fan" CTA (non-fans)
+│                                      Tip CTA always visible
 │                                      Auto-sets localStorage ref
 ├── tip/[username]/
-│   ├── page.tsx                    ← TWO ZONES: Tips (always) + Requests (if session active)
-│   ├── checkout.tsx                ← Handles both tip and request payment
-│   ├── success.tsx                 ← Shows "Join TipTask as a fan" CTA
-│   └── history.tsx                 ← Fan history (if logged in as fan)
+│   ├── page.tsx                    ← TWO ZONES: Tips (always) + Requests (session only)
+│   ├── checkout.tsx                ← Handles tip_id OR task_request_id
+│   ├── success.tsx                 ← Post-payment + "Join as fan" CTA
+│   └── history.tsx                 ← Fan history
+├── fan/
+│   ├── register/page.tsx           ← Fan signup, captures ref
+│   ├── login/page.tsx
+│   └── dashboard/page.tsx          ← Tips history, requests history, following
 ├── ref/[code]/page.tsx             ← Referral redirect
 ├── overlay/[username]/
 │   ├── page.tsx                    ← OBS overlay
-│   └── layout.tsx
-├── fan/
-│   ├── register/page.tsx           ← Fan registration (separate from creator registration)
-│   ├── login/page.tsx
-│   └── dashboard/page.tsx          ← Fan: followed creators, tip history, request history
+│   └── layout.tsx                  ← Transparent background
 ├── auth/
 │   ├── login/page.tsx              ← Creator login
-│   └── register/page.tsx           ← Creator registration
+│   └── register/page.tsx           ← Creator signup, captures ref
 ├── dashboard/
-│   ├── page.tsx                    ← Creator dashboard
-│   ├── live/page.tsx               ← Start/end request session
-│   ├── tips/page.tsx               ← All tips received (lifetime)
+│   ├── page.tsx                    ← Main dashboard (tips + requests stats)
+│   ├── live/page.tsx               ← Start/end session + OBS instructions
+│   ├── tips/page.tsx               ← Tips live feed (session/today/all)
 │   ├── tasks/page.tsx              ← CRUD predefined tasks
-│   ├── requests/page.tsx           ← Incoming requests (session-based)
-│   ├── sessions/page.tsx           ← Session history + stats
+│   ├── requests/page.tsx           ← Requests (pending/accepted/done)
+│   ├── sessions/page.tsx           ← Session history + per-session stats
 │   ├── payments/page.tsx           ← Stripe Connect + earnings
-│   ├── profile/page.tsx            ← Edit profile
+│   ├── profile/page.tsx            ← Edit bio, social links, custom links
 │   └── referrals/page.tsx          ← Referral hub
 └── api/
     ├── tips/
-    │   └── create/route.ts         ← Create tip PaymentIntent
+    │   └── create/route.ts         ← Create tip PaymentIntent → tips table
+    ├── notifications/
+    │   └── session-start/route.ts  ← Email fans via Resend when session starts
     └── payments/
         ├── create-intent/route.ts  ← Create request PaymentIntent
-        ├── confirm/route.ts        ← Confirm payment, update status
+        ├── confirm/route.ts        ← Handles tip_id OR task_request_id
         ├── respond/route.ts        ← Creator accept/decline
-        ├── complete/route.ts       ← Creator marks done
+        ├── complete/route.ts       ← Stripe capture + completed
         ├── extend/route.ts
         ├── refund/route.ts
         └── referral-hook.ts
 ```
+
+---
+
+## Payment Flows
+
+### Tip Flow
+```
+POST /api/tips/create
+  → Stripe PaymentIntent (automatic capture)
+  → tips row: status = 'draft'
+  → Stripe confirms automatically
+  → POST /api/payments/confirm { tip_id }
+  → tips row: status = 'completed'
+  → Creator sees in /dashboard/tips instantly
+```
+
+### Request Flow
+```
+POST /api/payments/create-intent
+  → Stripe PaymentIntent (manual capture)
+  → task_requests row: status = 'draft'
+  → POST /api/payments/confirm { task_request_id }
+  → status: 'pending'
+  → Creator accepts → 'accepted'
+  → Creator completes → Stripe capture → 'completed'
+```
+
+---
+
+## OBS Overlay
+URL: `tiptask.me/overlay/[username]`
+OBS: Width 600, Height 800 (portrait)
+Custom CSS: `body { background-color: rgba(0,0,0,0) !important; }`
+Params: `?qr=0` `?active=0` `?alerts=0` `?qrsize=220` `?label=text`
+
+Layout:
+1. Last tip / Highest tip — top, no border
+2. Incoming alerts — stack, 30s tasks / 10s tips
+3. Active requests list + QR — bottom
+
+---
+
+## Notifications (Resend)
+- Triggered: when creator starts a session
+- Recipients: fans following creator with notify_on_session_start = true
+- API route: POST /api/notifications/session-start { creator_id, session_id }
+- From: notifications@tiptask.me (needs Resend domain verification)
+- Fans manage in: /fan/dashboard → Following tab
 
 ---
 
@@ -277,50 +311,6 @@ app/
 
 ---
 
-## Payment Flows
-
-### Tip Flow
-```
-Tipper fills tip form (no session required)
-  ↓ POST /api/tips/create → Stripe PaymentIntent (automatic capture)
-  ↓ tips row inserted: status = 'draft'
-  ↓ Stripe confirms payment automatically
-  ↓ POST /api/payments/confirm → status: 'completed'
-  ↓ Creator sees tip in dashboard immediately
-```
-
-### Request Flow
-```
-Tipper fills request form (session must be active)
-  ↓ POST /api/payments/create-intent → Stripe PaymentIntent (manual capture)
-  ↓ task_requests row inserted: status = 'draft'
-  ↓ POST /api/payments/confirm → status: 'pending'
-  ↓ Creator accepts → status: 'accepted'
-  ↓ Creator completes → Stripe capture → status: 'completed'
-```
-
----
-
-## OBS Overlay
-URL: `tiptask.me/overlay/[username]`
-
-OBS Browser Source: Width 600, Height 800 (portrait)
-Custom CSS: `body { background-color: rgba(0,0,0,0) !important; }`
-
-URL params: `?qr=0` `?active=0` `?alerts=0` `?qrsize=220` `?label=text` `?colw=52vw`
-
-Layout: Last tip + Highest tip (top) → Alerts (middle) → Active requests + QR (bottom)
-
----
-
-## Supabase Notes
-- REPLICA IDENTITY FULL required: `ALTER TABLE task_requests REPLICA IDENTITY FULL;`
-- Also run for new tips table: `ALTER TABLE tips REPLICA IDENTITY FULL;`
-- Auth: email confirmation OFF (Supabase Dashboard → Authentication → Sign In/Providers)
-- Free plan: 4 signup emails/hour limit
-
----
-
 ## Environment Variables
 ```
 NEXT_PUBLIC_SUPABASE_URL
@@ -329,31 +319,33 @@ SUPABASE_SERVICE_ROLE_KEY
 STRIPE_SECRET_KEY
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 STRIPE_WEBHOOK_SECRET
+RESEND_API_KEY
+NEXT_PUBLIC_APP_URL = https://tiptask.me
 ```
 
 ---
 
 ## Vercel / Domain
-- Live at: tiptask.vercel.app
-- Domain: tiptask.me (DNS in progress — Vercel nameservers set in Namecheap)
+- Live: tiptask.vercel.app
+- Domain: tiptask.me (Vercel nameservers set in Namecheap)
 - Stripe webhook: https://tiptask.me/api/webhooks/stripe (test mode)
 
 ---
 
-## Pending Before Redesign Build
-- [ ] Confirm tiptask.me DNS resolves correctly
-- [ ] Switch to Stripe live keys when ready
-- [ ] Wire createReferralEarning() into complete/route.ts
+## Supabase Notes
+```sql
+-- Must be set for realtime to work
+ALTER TABLE task_requests REPLICA IDENTITY FULL;
+ALTER TABLE tips REPLICA IDENTITY FULL;
+-- Auth: email confirmation OFF
+-- Free plan: 4 signup emails/hour
+```
 
 ---
 
-## Build Order for Redesign
-1. SQL migrations (tips table, fans table, fan_follows table, update sessions table)
-2. API routes (tips/create, update confirm route)  
-3. Tip form UI (separated from requests)
-4. Creator dashboard (separated tips/requests sections)
-5. Fan registration + login
-6. Fan dashboard (history, follows)
-7. Session stats page
-8. Notifications (fan → creator session start)
-9. OBS overlay updates (show tips separately)
+## Pending / Next Steps
+- Verify tiptask.me domain in Resend for branded emails
+- Wire createReferralEarning() into complete/route.ts
+- Add Stripe webhook as backup for confirm route
+- Switch to Stripe live keys when ready
+- Test full flow end to end on tiptask.vercel.app
