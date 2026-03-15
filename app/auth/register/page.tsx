@@ -1,5 +1,4 @@
 'use client'
-
 import { useState, useEffect, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
@@ -18,18 +17,11 @@ function RegisterForm() {
   const [referrerName, setReferrerName] = useState<string | null>(null)
 
   useEffect(() => {
-    // Priority: ?ref= URL param → localStorage (set when visiting a creator profile)
-    const ref = searchParams.get('ref') || localStorage.getItem('tiptask_ref')
+    const ref = searchParams.get('ref') || (typeof window !== 'undefined' ? localStorage.getItem('tiptask_ref') : null)
     if (ref) {
       setReferredBy(ref)
-      supabase
-        .from('creators')
-        .select('display_name')
-        .eq('referral_code', ref)
-        .single()
-        .then(({ data }) => {
-          if (data) setReferrerName(data.display_name)
-        })
+      supabase.from('creators').select('display_name').eq('referral_code', ref).single()
+        .then(({ data }) => { if (data) setReferrerName(data.display_name) })
     }
   }, [searchParams])
 
@@ -38,54 +30,50 @@ function RegisterForm() {
     setLoading(true)
     setError('')
 
-    const { data: existing } = await supabase
-      .from('creators')
-      .select('username')
-      .eq('username', username.toLowerCase())
-      .single()
+    try {
+      // Step 1: Create user via our API (bypasses Supabase email rate limits)
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          username: username.toLowerCase(),
+          display_name: displayName,
+          referred_by: referredBy || null,
+          user_type: 'creator',
+        }),
+      })
 
-    if (existing) {
-      setError('Username already taken. Please choose another.')
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Something went wrong')
+        setLoading(false)
+        return
+      }
+
+      // Step 2: Sign in immediately
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+      if (signInError) {
+        setError('Account created but sign in failed. Please go to login.')
+        setLoading(false)
+        return
+      }
+
+      if (typeof window !== 'undefined') localStorage.removeItem('tiptask_ref')
+      router.push('/dashboard')
+    } catch (err: any) {
+      setError(err.message)
       setLoading(false)
-      return
     }
-
-    const { data, error: signUpError } = await supabase.auth.signUp({ email, password })
-
-    if (signUpError || !data.user) {
-      setError(signUpError?.message || 'Something went wrong')
-      setLoading(false)
-      return
-    }
-
-    const { error: profileError } = await supabase.from('creators').insert({
-      id: data.user.id,
-      email,
-      username: username.toLowerCase(),
-      display_name: displayName,
-      referral_code: username.toLowerCase(),
-      referred_by: referredBy || null,
-    })
-
-    if (profileError) {
-      setError(`${profileError.message} (code: ${profileError.code}, details: ${profileError.details})`)
-      setLoading(false)
-      return
-    }
-
-    // Clear referral from localStorage after successful registration
-    localStorage.removeItem('tiptask_ref')
-
-    router.push('/dashboard')
   }
 
   return (
     <main className="min-h-screen bg-[#08080C] flex flex-col items-center justify-center p-8 relative overflow-hidden">
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[300px] bg-[#4AFFD4] opacity-[0.04] blur-[100px] pointer-events-none" />
-
       <div className="max-w-md w-full space-y-8 relative z-10">
         <div className="text-center">
-          <Link href="/" className="text-3xl font-extrabold tracking-tight">
+          <Link href="/" className="text-3xl font-extrabold tracking-tight text-white">
             Tip<span className="text-[#4AFFD4]">Task</span>
           </Link>
           <p className="text-white/40 mt-2">Create your creator account</p>
@@ -112,7 +100,8 @@ function RegisterForm() {
               <label className="block text-sm font-medium text-white/60 mb-1.5">Username</label>
               <div className="relative">
                 <span className="absolute left-4 top-3 text-white/20 text-sm">tiptask.me/</span>
-                <input type="text" value={username} onChange={e => setUsername(e.target.value.replace(/[^a-z0-9_]/g, ''))} required
+                <input type="text" value={username}
+                  onChange={e => setUsername(e.target.value.replace(/[^a-z0-9_]/g, ''))} required
                   className="w-full bg-[#08080C] border border-white/[0.08] rounded-xl pl-24 pr-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-[#4AFFD4]/50 transition"
                   placeholder="djshadow" />
               </div>
@@ -141,6 +130,10 @@ function RegisterForm() {
         <p className="text-center text-white/30 text-sm">
           Already have an account?{' '}
           <Link href="/auth/login" className="text-[#4AFFD4] font-medium hover:text-[#6FFFDF] transition">Sign in</Link>
+        </p>
+        <p className="text-center text-white/20 text-xs">
+          Want to tip creators instead?{' '}
+          <Link href="/fan/register" className="text-white/40 hover:text-white/60 transition">Join as fan →</Link>
         </p>
       </div>
     </main>

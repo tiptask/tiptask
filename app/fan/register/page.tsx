@@ -29,35 +29,40 @@ function FanRegisterForm() {
     setLoading(true)
     setError('')
 
-    // Sign up via Supabase Auth
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { display_name: displayName, user_type: 'fan' } }
-    })
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          display_name: displayName,
+          referred_by: referredBy || null,
+          user_type: 'fan',
+        }),
+      })
 
-    if (signUpError || !data.user) {
-      setError(signUpError?.message || 'Something went wrong')
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Something went wrong')
+        setLoading(false)
+        return
+      }
+
+      // Sign in immediately
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+      if (signInError) {
+        setError('Account created but sign in failed. Please go to login.')
+        setLoading(false)
+        return
+      }
+
+      if (typeof window !== 'undefined') localStorage.removeItem('tiptask_ref')
+      router.push('/fan/dashboard')
+    } catch (err: any) {
+      setError(err.message)
       setLoading(false)
-      return
     }
-
-    // Insert fan record
-    const { error: fanError } = await supabase.from('fans').insert({
-      id: data.user.id,
-      email,
-      display_name: displayName,
-      referred_by: referredBy || null,
-    })
-
-    if (fanError) {
-      setError(fanError.message)
-      setLoading(false)
-      return
-    }
-
-    if (typeof window !== 'undefined') localStorage.removeItem('tiptask_ref')
-    router.push('/fan/dashboard')
   }
 
   return (
