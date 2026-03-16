@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
@@ -10,9 +10,12 @@ export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
   const [profile, setProfile] = useState<any>(null)
   const [session, setSession] = useState<any>(null)
-  const [recentTips, setRecentTips] = useState<any[]>([])
   const [pendingRequests, setPendingRequests] = useState<any[]>([])
-  const [stats, setStats] = useState({ tipsReceivedAmount: 0, tipsReceivedCount: 0, requestsAmount: 0, requestsCount: 0, tipsSentAmount: 0, tipsSentCount: 0 })
+  const [stats, setStats] = useState({
+    tipsReceivedAmount: 0, tipsReceivedCount: 0, tipsFees: 0,
+    requestsAmount: 0, requestsCount: 0, requestsFees: 0,
+    tipsSentAmount: 0, tipsSentCount: 0,
+  })
   const [loading, setLoading] = useState(true)
   const userIdRef = useRef<string | null>(null)
 
@@ -32,63 +35,47 @@ export default function DashboardPage() {
           const { data: reqs } = await supabase.from('task_requests').select('*').eq('session_id', s.id).eq('status', 'pending').order('created_at', { ascending: false }).limit(5)
           setPendingRequests(reqs || [])
         }
-        const { data: tips } = await supabase.from('tips').select('*').eq('receiver_id', user.id).eq('status', 'completed').order('created_at', { ascending: false }).limit(5)
-        setRecentTips(tips || [])
       }
 
       userIdRef.current = user.id
-
-      // Stats
-      const [{ data: tipsRec }, { data: reqs }, { data: tipsSent }] = await Promise.all([
-        supabase.from('tips').select('amount').eq('receiver_id', user.id).eq('status', 'completed'),
-        supabase.from('task_requests').select('amount').eq('receiver_id', user.id).eq('status', 'completed'),
-        supabase.from('tips').select('amount').eq('sender_id', user.id).eq('status', 'completed'),
-      ])
-      setStats({
-        tipsReceivedAmount: tipsRec?.reduce((s, t) => s + t.amount, 0) || 0,
-        tipsReceivedCount: tipsRec?.length || 0,
-        requestsAmount: reqs?.reduce((s, r) => s + r.amount, 0) || 0,
-        requestsCount: reqs?.length || 0,
-        tipsSentAmount: tipsSent?.reduce((s, t) => s + t.amount, 0) || 0,
-        tipsSentCount: tipsSent?.length || 0,
-      })
+      await fetchStats(user.id)
       setLoading(false)
     }
     load()
   }, [router])
 
-  // Realtime + polling — reload dashboard every 5s
+  async function fetchStats(uid: string) {
+    const [{ data: tipsRec }, { data: reqs }, { data: tipsSent }] = await Promise.all([
+      supabase.from('tips').select('amount, platform_fee').eq('receiver_id', uid).eq('status', 'completed'),
+      supabase.from('task_requests').select('amount, platform_fee').eq('receiver_id', uid).eq('status', 'completed'),
+      supabase.from('tips').select('amount').eq('sender_id', uid).eq('status', 'completed'),
+    ])
+    setStats({
+      tipsReceivedAmount: tipsRec?.reduce((s, t) => s + t.amount, 0) || 0,
+      tipsReceivedCount: tipsRec?.length || 0,
+      tipsFees: tipsRec?.reduce((s, t) => s + (t.platform_fee ?? 0), 0) || 0,
+      requestsAmount: reqs?.reduce((s, r) => s + r.amount, 0) || 0,
+      requestsCount: reqs?.length || 0,
+      requestsFees: reqs?.reduce((s, r) => s + (r.platform_fee ?? 0), 0) || 0,
+      tipsSentAmount: tipsSent?.reduce((s, t) => s + t.amount, 0) || 0,
+      tipsSentCount: tipsSent?.length || 0,
+    })
+  }
+
   useEffect(() => {
     if (!userIdRef.current) return
     const uid = userIdRef.current
 
     async function refresh() {
-      const [{ data: tipsRec }, { data: reqs }, { data: tipsSent }, { data: s }] = await Promise.all([
-        supabase.from('tips').select('amount').eq('receiver_id', uid).eq('status', 'completed'),
-        supabase.from('task_requests').select('amount').eq('receiver_id', uid).eq('status', 'completed'),
-        supabase.from('tips').select('amount').eq('sender_id', uid).eq('status', 'completed'),
-        supabase.from('sessions').select('*').eq('user_id', uid).eq('is_active', true).single(),
-      ])
-      setStats({
-        tipsReceivedAmount: tipsRec?.reduce((s, t) => s + t.amount, 0) || 0,
-        tipsReceivedCount: tipsRec?.length || 0,
-        requestsAmount: reqs?.reduce((s, r) => s + r.amount, 0) || 0,
-        requestsCount: reqs?.length || 0,
-        tipsSentAmount: tipsSent?.reduce((s, t) => s + t.amount, 0) || 0,
-        tipsSentCount: tipsSent?.length || 0,
-      })
+      await fetchStats(uid)
+      const { data: s } = await supabase.from('sessions').select('*').eq('user_id', uid).eq('is_active', true).single()
       setSession(s ?? null)
-
       if (s) {
         const { data: recentReqs } = await supabase.from('task_requests').select('*')
           .eq('session_id', s.id).eq('status', 'pending')
           .or('expires_at.is.null,expires_at.gt.' + new Date().toISOString())
           .order('created_at', { ascending: false }).limit(5)
         setPendingRequests(recentReqs || [])
-        const { data: tips } = await supabase.from('tips').select('*')
-          .eq('receiver_id', uid).eq('status', 'completed')
-          .order('created_at', { ascending: false }).limit(5)
-        setRecentTips(tips || [])
       }
     }
 
@@ -100,14 +87,16 @@ export default function DashboardPage() {
       .subscribe()
     const poll = setInterval(refresh, 5000)
 
-    return () => {
-      supabase.removeChannel(tipsChannel)
-      supabase.removeChannel(reqsChannel)
-      clearInterval(poll)
-    }
-  }, [loading]) // runs after initial load completes
+    return () => { supabase.removeChannel(tipsChannel); supabase.removeChannel(reqsChannel); clearInterval(poll) }
+  }, [loading])
 
   const currency = profile?.currency?.toUpperCase() ?? 'RON'
+  const tier = profile?.tier || 'starter'
+  const commissionRate = profile?.custom_commission_rate ?? 0.15
+  const feePercent = Math.round(commissionRate * 100)
+
+  const tipsNet = stats.tipsReceivedAmount - stats.tipsFees
+  const requestsNet = stats.requestsAmount - stats.requestsFees
 
   if (loading) return (
     <>
@@ -137,7 +126,6 @@ export default function DashboardPage() {
             </Link>
           </div>
 
-          {/* Creator section — only if accepts_tips */}
           {profile?.accepts_tips && (
             <>
               {/* Session banner */}
@@ -145,11 +133,24 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     {session ? (
-                      <><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4AFFD4] opacity-50" /><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#4AFFD4]" /></span>
-                      <div><p className="text-[#4AFFD4] font-semibold text-sm">Session active</p><p className="text-white/30 text-xs">Requests enabled</p></div></>
+                      <>
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4AFFD4] opacity-50" />
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#4AFFD4]" />
+                        </span>
+                        <div>
+                          <p className="text-[#4AFFD4] font-semibold text-sm">Session active</p>
+                          <p className="text-white/30 text-xs">Requests enabled</p>
+                        </div>
+                      </>
                     ) : (
-                      <><span className="h-2.5 w-2.5 rounded-full bg-white/15" />
-                      <div><p className="text-white/60 font-semibold text-sm">No active session</p><p className="text-white/25 text-xs">Tips still work</p></div></>
+                      <>
+                        <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
+                        <div>
+                          <p className="text-white/60 font-semibold text-sm">No active session</p>
+                          <p className="text-white/25 text-xs">Tips still work</p>
+                        </div>
+                      </>
                     )}
                   </div>
                   <Link href="/dashboard/live" className={`px-4 py-2 rounded-xl text-sm font-bold transition ${session ? 'bg-white/[0.07] text-white/60 hover:bg-white/[0.10]' : 'bg-[#4AFFD4] text-[#08080C] hover:bg-[#6FFFDF]'}`}>
@@ -162,48 +163,87 @@ export default function DashboardPage() {
               {pendingRequests.length > 0 && (
                 <Link href="/dashboard/requests" className="flex items-center justify-between bg-amber-500/[0.08] border border-amber-500/20 rounded-2xl px-5 py-4 mb-5 hover:bg-amber-500/[0.12] transition">
                   <div className="flex items-center gap-3">
-                    <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60" /><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400" /></span>
-                    <div><p className="text-amber-300 font-semibold text-sm">{pendingRequests.length} pending request{pendingRequests.length > 1 ? 's' : ''}</p><p className="text-amber-400/50 text-xs">Tap to accept or decline</p></div>
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400" />
+                    </span>
+                    <div>
+                      <p className="text-amber-300 font-semibold text-sm">{pendingRequests.length} pending request{pendingRequests.length > 1 ? 's' : ''}</p>
+                      <p className="text-amber-400/50 text-xs">Tap to accept or decline</p>
+                    </div>
                   </div>
                   <span className="text-amber-400/50">→</span>
                 </Link>
               )}
 
-              {/* Stats */}
+              {/* Stats cards */}
               <div className="grid grid-cols-2 gap-3 mb-5">
-                <Link href="/dashboard/tips" className="bg-[#111117] border border-white/[0.06] hover:border-amber-500/20 rounded-2xl p-4 transition">
-                  <div className="flex items-center gap-2 mb-2"><span>💸</span><p className="text-white/40 text-xs font-semibold uppercase tracking-widest">Tips received</p></div>
-                  <p className="text-amber-400 font-black text-2xl">{stats.tipsReceivedAmount.toFixed(0)}</p>
-                  <p className="text-white/20 text-xs">{currency} · {stats.tipsReceivedCount} tips</p>
-                </Link>
-                <Link href="/dashboard/requests" className="bg-[#111117] border border-white/[0.06] hover:border-[#4AFFD4]/20 rounded-2xl p-4 transition">
-                  <div className="flex items-center gap-2 mb-2"><span>🎯</span><p className="text-white/40 text-xs font-semibold uppercase tracking-widest">Requests</p></div>
-                  <p className="text-[#4AFFD4] font-black text-2xl">{stats.requestsAmount.toFixed(0)}</p>
-                  <p className="text-white/20 text-xs">{currency} · {stats.requestsCount} done</p>
-                </Link>
-              </div>
 
-              {/* Recent tips */}
-              {recentTips.length > 0 && (
-                <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-4 mb-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-white/40 text-xs font-semibold uppercase tracking-widest">Recent tips</p>
-                    <Link href="/dashboard/tips" className="text-white/25 text-xs hover:text-white/50 transition">See all →</Link>
+                {/* Tips received */}
+                <Link href="/dashboard/tips" className="bg-[#111117] border border-white/[0.06] hover:border-amber-500/20 rounded-2xl p-4 transition group">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span>💸</span>
+                    <p className="text-white/40 text-xs font-semibold uppercase tracking-widest">Tips received</p>
                   </div>
-                  <div className="space-y-2">
-                    {recentTips.map(tip => (
-                      <div key={tip.id} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 min-w-0"><span>💸</span><span className="text-white/60 text-sm truncate">{tip.sender_name}</span>{tip.message && <span className="text-white/25 text-xs italic truncate">"{tip.message}"</span>}</div>
-                        <span className="text-amber-400 font-bold text-sm shrink-0 ml-2">{tip.amount} {currency}</span>
-                      </div>
-                    ))}
+                  <p className="text-amber-400 font-black text-2xl">{stats.tipsReceivedAmount.toFixed(0)}</p>
+                  <p className="text-white/20 text-xs mb-3">{currency} · {stats.tipsReceivedCount} tips</p>
+
+                  {/* Fees breakdown */}
+                  <div className="border-t border-white/[0.05] pt-2.5 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-white/25">Fees ({feePercent}%)</span>
+                      <span className="text-red-400/50">−{stats.tipsFees.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-white/40 font-medium">You got</span>
+                      <span className="text-[#4AFFD4] font-bold">{tipsNet.toFixed(2)}</span>
+                    </div>
                   </div>
-                </div>
-              )}
+
+                  {/* Upgrade CTA */}
+                  {tier !== 'elite' && tier !== 'partner' && (
+                    <div className="mt-2.5 flex items-center gap-1 bg-[#4AFFD4]/[0.04] border border-[#4AFFD4]/10 rounded-lg px-2 py-1.5 group-hover:border-[#4AFFD4]/20 transition">
+                      <span className="text-[10px]">⚡</span>
+                      <span className="text-[#4AFFD4]/50 text-[10px] font-medium">Upgrade for lower fees →</span>
+                    </div>
+                  )}
+                </Link>
+
+                {/* Requests */}
+                <Link href="/dashboard/requests" className="bg-[#111117] border border-white/[0.06] hover:border-[#4AFFD4]/20 rounded-2xl p-4 transition group">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span>🎯</span>
+                    <p className="text-white/40 text-xs font-semibold uppercase tracking-widest">Requests</p>
+                  </div>
+                  <p className="text-[#4AFFD4] font-black text-2xl">{stats.requestsAmount.toFixed(0)}</p>
+                  <p className="text-white/20 text-xs mb-3">{currency} · {stats.requestsCount} done</p>
+
+                  {/* Fees breakdown */}
+                  <div className="border-t border-white/[0.05] pt-2.5 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-white/25">Fees ({feePercent}%)</span>
+                      <span className="text-red-400/50">−{stats.requestsFees.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-white/40 font-medium">You got</span>
+                      <span className="text-[#4AFFD4] font-bold">{requestsNet.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {/* Upgrade CTA */}
+                  {tier !== 'elite' && tier !== 'partner' && (
+                    <div className="mt-2.5 flex items-center gap-1 bg-[#4AFFD4]/[0.04] border border-[#4AFFD4]/10 rounded-lg px-2 py-1.5 group-hover:border-[#4AFFD4]/20 transition">
+                      <span className="text-[10px]">⚡</span>
+                      <span className="text-[#4AFFD4]/50 text-[10px] font-medium">Upgrade for lower fees →</span>
+                    </div>
+                  )}
+                </Link>
+
+              </div>
             </>
           )}
 
-          {/* Tips sent (everyone) */}
+          {/* Tips sent */}
           <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-4 mb-5">
             <div className="flex items-center gap-2 mb-2"><span>🎁</span><p className="text-white/40 text-xs font-semibold uppercase tracking-widest">Tips sent</p></div>
             <p className="text-white font-black text-2xl">{stats.tipsSentAmount.toFixed(0)}</p>
@@ -235,6 +275,7 @@ export default function DashboardPage() {
               </Link>
             ))}
           </div>
+
         </div>
       </main>
       <BottomNav />
