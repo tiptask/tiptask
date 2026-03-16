@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
@@ -14,6 +14,7 @@ export default function DashboardPage() {
   const [pendingRequests, setPendingRequests] = useState<any[]>([])
   const [stats, setStats] = useState({ tipsReceivedAmount: 0, tipsReceivedCount: 0, requestsAmount: 0, requestsCount: 0, tipsSentAmount: 0, tipsSentCount: 0 })
   const [loading, setLoading] = useState(true)
+  const userIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -35,6 +36,8 @@ export default function DashboardPage() {
         setRecentTips(tips || [])
       }
 
+      userIdRef.current = user.id
+
       // Stats
       const [{ data: tipsRec }, { data: reqs }, { data: tipsSent }] = await Promise.all([
         supabase.from('tips').select('amount').eq('receiver_id', user.id).eq('status', 'completed'),
@@ -53,6 +56,55 @@ export default function DashboardPage() {
     }
     load()
   }, [router])
+
+  // Realtime + polling — reload dashboard every 5s
+  useEffect(() => {
+    if (!userIdRef.current) return
+    const uid = userIdRef.current
+
+    async function refresh() {
+      const [{ data: tipsRec }, { data: reqs }, { data: tipsSent }, { data: s }] = await Promise.all([
+        supabase.from('tips').select('amount').eq('receiver_id', uid).eq('status', 'completed'),
+        supabase.from('task_requests').select('amount').eq('receiver_id', uid).eq('status', 'completed'),
+        supabase.from('tips').select('amount').eq('sender_id', uid).eq('status', 'completed'),
+        supabase.from('sessions').select('*').eq('user_id', uid).eq('is_active', true).single(),
+      ])
+      setStats({
+        tipsReceivedAmount: tipsRec?.reduce((s, t) => s + t.amount, 0) || 0,
+        tipsReceivedCount: tipsRec?.length || 0,
+        requestsAmount: reqs?.reduce((s, r) => s + r.amount, 0) || 0,
+        requestsCount: reqs?.length || 0,
+        tipsSentAmount: tipsSent?.reduce((s, t) => s + t.amount, 0) || 0,
+        tipsSentCount: tipsSent?.length || 0,
+      })
+      setSession(s ?? null)
+
+      if (s) {
+        const { data: recentReqs } = await supabase.from('task_requests').select('*')
+          .eq('session_id', s.id).eq('status', 'pending')
+          .order('created_at', { ascending: false }).limit(5)
+        setPendingRequests(recentReqs || [])
+        const { data: tips } = await supabase.from('tips').select('*')
+          .eq('receiver_id', uid).eq('status', 'completed')
+          .order('created_at', { ascending: false }).limit(5)
+        setRecentTips(tips || [])
+      }
+    }
+
+    const tipsChannel = supabase.channel(`dash-tips-${uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tips', filter: `receiver_id=eq.${uid}` }, refresh)
+      .subscribe()
+    const reqsChannel = supabase.channel(`dash-reqs-${uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_requests', filter: `receiver_id=eq.${uid}` }, refresh)
+      .subscribe()
+    const poll = setInterval(refresh, 5000)
+
+    return () => {
+      supabase.removeChannel(tipsChannel)
+      supabase.removeChannel(reqsChannel)
+      clearInterval(poll)
+    }
+  }, [loading]) // runs after initial load completes
 
   const currency = profile?.currency?.toUpperCase() ?? 'RON'
 
