@@ -73,21 +73,30 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
     load()
   }, [params.username, loadSession])
 
-  // Realtime: track session changes + request status
+  // Realtime: session changes
   useEffect(() => {
     if (!profileId) return
-    const channel = supabase.channel(`tip-page-${profileId}`)
+    const channel = supabase.channel(`tip-session-${profileId}-${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `user_id=eq.${profileId}` },
         () => loadSession(profileId))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'task_requests' },
-        (payload) => {
-          if (payload.new.id === taskRequestId) {
-            setMyRequestStatus(payload.new.status)
-          }
-        })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [profileId, taskRequestId, loadSession])
+  }, [profileId, loadSession])
+
+  // Realtime: watch specific request status once we have the ID
+  useEffect(() => {
+    if (!taskRequestId) return
+    const channel = supabase.channel(`tip-request-${taskRequestId}-${Date.now()}`)
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'task_requests',
+        filter: `id=eq.${taskRequestId}`,
+      }, (payload) => {
+        const newStatus = payload.new?.status
+        if (newStatus) setMyRequestStatus(newStatus)
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [taskRequestId])
 
   const currency = (profile?.currency || 'RON').toUpperCase()
   const currencyLower = currency.toLowerCase()
