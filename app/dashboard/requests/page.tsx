@@ -31,22 +31,11 @@ export default function RequestsPage() {
     const { data } = await supabase.from('task_requests').select('*, tasks(title)').eq('session_id', sid).order('created_at', { ascending: false })
     if (data) {
       const now = Date.now()
-      // Pending: only non-expired
-      const activePending = data.filter(r => r.status === 'pending' && (!r.expires_at || new Date(r.expires_at).getTime() > now))
-      const expiredPending = data.filter(r => r.status === 'pending' && r.expires_at && new Date(r.expires_at).getTime() <= now)
       const activeAccepted = data.filter(r => r.status === 'accepted' && (!r.expires_at || new Date(r.expires_at).getTime() > now))
       const expiredAccepted = data.filter(r => r.status === 'accepted' && r.expires_at && new Date(r.expires_at).getTime() <= now)
-      setPending(activePending)
+      setPending(data.filter(r => r.status === 'pending'))
       setAccepted(activeAccepted)
-      setDone([
-        ...expiredPending.map(r => ({ ...r, _display_status: 'expired_pending' })),
-        ...expiredAccepted.map(r => ({ ...r, _display_status: 'expired' })),
-        ...data.filter(r => ['completed','declined','refunded'].includes(r.status))
-      ])
-      // Trigger auto-decline for expired pending
-      if (expiredPending.length > 0) {
-        fetch('/api/payments/auto-decline', { method: 'POST' }).catch(() => {})
-      }
+      setDone([...expiredAccepted.map(r => ({ ...r, _display_status: 'expired' })), ...data.filter(r => ['completed','declined','refunded'].includes(r.status))])
     }
   }, [])
 
@@ -86,8 +75,6 @@ export default function RequestsPage() {
       .subscribe()
     const poll = setInterval(() => {
       if (sessionIdRef.current) {
-        // Auto-decline expired pending requests
-        fetch('/api/payments/auto-decline', { method: 'POST' }).catch(() => {})
         loadRequests(sessionIdRef.current)
         if (userIdRef.current) loadTips(sessionIdRef.current, userIdRef.current)
       }
@@ -138,29 +125,9 @@ export default function RequestsPage() {
 
   const currency = profile?.currency?.toUpperCase() ?? 'RON'
   const commissionRate = profile?.custom_commission_rate ?? 0.15
-  // Re-filter pending/accepted on every tick so expired items move instantly
-  useEffect(() => {
-    const now = Date.now()
-    setPending(prev => {
-      const nowExpired = prev.filter(r => r.expires_at && new Date(r.expires_at).getTime() <= now)
-      if (nowExpired.length > 0) {
-        setDone(d => [...nowExpired.map(r => ({ ...r, _display_status: 'expired_pending' })), ...d])
-        fetch('/api/payments/auto-decline', { method: 'POST' }).catch(() => {})
-        return prev.filter(r => !r.expires_at || new Date(r.expires_at).getTime() > now)
-      }
-      return prev
-    })
-    setAccepted(prev => {
-      const nowExpired = prev.filter(r => r.expires_at && new Date(r.expires_at).getTime() <= now)
-      if (nowExpired.length > 0) {
-        setDone(d => [...nowExpired.map(r => ({ ...r, _display_status: 'expired' })), ...d])
-        return prev.filter(r => !r.expires_at || new Date(r.expires_at).getTime() > now)
-      }
-      return prev
-    })
-  }, [tick])
-
   const tipsTotalThisSession = recentTips.reduce((s, t) => s + t.amount, 0)
+  const tipsFeesThisSession = recentTips.reduce((s, t) => s + (t.platform_fee ?? 0), 0)
+  const tipsNetThisSession = tipsTotalThisSession - tipsFeesThisSession
 
   const Card = ({ req, showActions }: { req: any, showActions: boolean }) => {
     const isCustom = !!req.custom_task_text
@@ -299,19 +266,6 @@ export default function RequestsPage() {
                     {done.map(r => {
                       const displayStatus = r._display_status || r.status
                       if (displayStatus === 'expired') return <Card key={r.id} req={r} showActions={false} />
-                      if (displayStatus === 'expired_pending') return (
-                        <div key={r.id} className="flex items-center justify-between px-3 py-2 bg-white/[0.02] border border-white/[0.03] rounded-xl opacity-40">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-xs">{r.custom_task_text ? '✏️' : '🎯'}</span>
-                            <span className="text-white/40 text-xs truncate">{r.tasks?.title || r.custom_task_text}</span>
-                            <span className="text-white/20 text-xs">by {r.sender_name}</span>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-white/30 text-xs">{r.amount} {currency}</span>
-                            <span className="bg-white/[0.04] text-white/25 text-xs px-1.5 py-0.5 rounded-full">expired</span>
-                          </div>
-                        </div>
-                      )
                       return (
                         <div key={r.id} className="flex items-center justify-between px-3 py-2.5 bg-[#111117] border border-white/[0.04] rounded-xl">
                           <div className="flex items-center gap-2 min-w-0">
