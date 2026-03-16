@@ -1,29 +1,76 @@
 'use client'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+
+const DASHBOARD_MENU = [
+  { href: '/dashboard', icon: '📊', label: 'Dashboard' },
+  { href: '/dashboard/tips', icon: '💸', label: 'Tips' },
+  { href: '/dashboard/requests', icon: '🎯', label: 'Requests' },
+  { href: '/dashboard/following', icon: '❤️', label: 'Following' },
+  { href: '/dashboard/history', icon: '📜', label: 'History' },
+  { href: '/dashboard/live', icon: '🔴', label: 'Session' },
+  { href: '/dashboard/tasks', icon: '📋', label: 'Tasks' },
+  { href: '/dashboard/payments', icon: '💳', label: 'Payments' },
+  { href: '/dashboard/referrals', icon: '🔗', label: 'Referrals' },
+  { href: '/dashboard/profile', icon: '⚙️', label: 'Settings' },
+]
 
 export function TopNav() {
   const pathname = usePathname()
+  const router = useRouter()
   const [user, setUser] = useState<any>(null)
+  const [profile, setProfile] = useState<any>(null)
   const [authReady, setAuthReady] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null)
+      if (session?.user) {
+        const { data } = await supabase.from('users').select('display_name,username,tier').eq('id', session.user.id).single()
+        setProfile(data)
+      }
       setAuthReady(true)
     })
-    // Listen for changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_, session) => {
       setUser(session?.user ?? null)
+      if (session?.user) {
+        const { data } = await supabase.from('users').select('display_name,username,tier').eq('id', session.user.id).single()
+        setProfile(data)
+      } else {
+        setProfile(null)
+      }
       setAuthReady(true)
     })
     return () => subscription.unsubscribe()
   }, [])
 
-  const isDashboard = pathname?.startsWith('/dashboard')
+  // Close menu on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  // Close menu on route change
+  useEffect(() => { setMenuOpen(false) }, [pathname])
+
+  async function handleLogout() {
+    await supabase.auth.signOut()
+    router.push('/')
+  }
+
+  const tierColors: Record<string, string> = {
+    starter: 'text-white/30', rising: 'text-blue-400', pro: 'text-purple-400',
+    elite: 'text-amber-400', partner: 'text-[#4AFFD4]', promo: 'text-pink-400',
+  }
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[#08080C]/90 backdrop-blur-md border-b border-white/[0.05]">
@@ -38,16 +85,67 @@ export function TopNav() {
             }`}>
             Discover
           </Link>
-          {/* Only render auth buttons once we know the auth state */}
+
           {!authReady ? (
-            <div className="w-20 h-8 rounded-xl bg-white/[0.04] animate-pulse" />
+            <div className="w-8 h-8 rounded-full bg-white/[0.04] animate-pulse" />
           ) : user ? (
-            <Link href="/dashboard"
-              className={`px-3 py-1.5 rounded-xl text-sm font-medium transition ${
-                isDashboard ? 'text-[#4AFFD4] bg-[#4AFFD4]/10' : 'text-white/40 hover:text-white/70'
-              }`}>
-              Dashboard
-            </Link>
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setMenuOpen(o => !o)}
+                className={`w-9 h-9 rounded-full border-2 flex items-center justify-center font-bold text-sm transition ml-1 ${
+                  menuOpen
+                    ? 'border-[#4AFFD4] bg-[#4AFFD4]/10 text-[#4AFFD4]'
+                    : 'border-white/[0.12] bg-white/[0.05] text-white/60 hover:border-white/[0.25] hover:text-white'
+                }`}>
+                {profile?.display_name?.[0]?.toUpperCase() || '?'}
+              </button>
+
+              {menuOpen && (
+                <div className="absolute right-0 top-11 w-56 bg-[#111117] border border-white/[0.10] rounded-2xl shadow-2xl overflow-hidden">
+                  {/* User info */}
+                  <div className="px-4 py-3 border-b border-white/[0.06]">
+                    <p className="text-white font-semibold text-sm">{profile?.display_name}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-white/30 text-xs">@{profile?.username}</p>
+                      {profile?.tier && (
+                        <span className={`text-xs font-semibold ${tierColors[profile.tier] || 'text-white/30'}`}>
+                          · {profile.tier}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Menu items */}
+                  <div className="py-1.5">
+                    {DASHBOARD_MENU.map(item => (
+                      <Link key={item.href} href={item.href}
+                        className={`flex items-center gap-3 px-4 py-2 text-sm transition ${
+                          pathname === item.href
+                            ? 'text-[#4AFFD4] bg-[#4AFFD4]/[0.06]'
+                            : 'text-white/50 hover:text-white hover:bg-white/[0.04]'
+                        }`}>
+                        <span className="text-base w-5 text-center">{item.icon}</span>
+                        {item.label}
+                      </Link>
+                    ))}
+                  </div>
+
+                  {/* Profile + logout */}
+                  <div className="border-t border-white/[0.06] py-1.5">
+                    <Link href={`/${profile?.username}`}
+                      className="flex items-center gap-3 px-4 py-2 text-sm text-white/50 hover:text-white hover:bg-white/[0.04] transition">
+                      <span className="text-base w-5 text-center">👤</span>
+                      My profile
+                    </Link>
+                    <button onClick={handleLogout}
+                      className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-400/60 hover:text-red-400 hover:bg-red-500/[0.04] transition">
+                      <span className="text-base w-5 text-center">→</span>
+                      Sign out
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
             <>
               <Link href="/auth/login"

@@ -21,7 +21,7 @@ export default function HomePage() {
           <RotatingTagline />
 
           <p className="text-white/25 text-sm mb-10">
-            Lowest fees online — only 15%, down to 5% on premium.
+            Less fees. More yours.
           </p>
 
           <div className="flex flex-col gap-3 w-full">
