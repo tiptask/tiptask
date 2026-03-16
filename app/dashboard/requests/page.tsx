@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { TopNav, BackButton, BottomNav } from '@/components/nav'
@@ -18,6 +18,7 @@ export default function RequestsPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const [userId, setUserId] = useState<string | null>(null)
+  const sessionIdRef = React.useRef<string | null>(null)
 
   useEffect(() => {
     const i = setInterval(() => setTick(t => t + 1), 1000)
@@ -55,7 +56,7 @@ export default function RequestsPage() {
       setProfile(p)
       const { data: s } = await supabase.from('sessions').select('*').eq('user_id', user.id).eq('is_active', true).single()
       setSession(s ?? null)
-      if (s) { setSessionId(s.id); await loadRequests(s.id) }
+      if (s) { setSessionId(s.id); sessionIdRef.current = s.id; await loadRequests(s.id) }
       setLoading(false)
     }
     load()
@@ -71,9 +72,9 @@ export default function RequestsPage() {
         filter: `receiver_id=eq.${userId}`,
       }, () => { if (sessionId) loadRequests(sessionId) })
       .subscribe()
-    // Polling fallback
+    // Polling fallback — use ref to always have latest sessionId
     const poll = setInterval(() => {
-      if (sessionId) loadRequests(sessionId)
+      if (sessionIdRef.current) loadRequests(sessionIdRef.current)
     }, 4000)
     return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [userId, sessionId, loadRequests])

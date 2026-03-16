@@ -1,6 +1,5 @@
 'use client'
-import React from 'react'
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -25,6 +24,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
   const [isFollowing, setIsFollowing] = useState(false)
   const [followLoading, setFollowLoading] = useState(false)
   const [loading, setLoading] = useState(true)
+  const profileIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (RESERVED.includes(params.username)) { router.replace('/' + params.username); return }
@@ -64,7 +64,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `user_id=eq.${profile.id}` },
         () => loadSession(profile.id))
       .subscribe()
-    const poll = setInterval(() => loadSession(profile.id), 5000)
+    const poll = setInterval(() => { if (profileIdRef.current) loadSession(profileIdRef.current) }, 5000)
     return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [profile?.id, loadSession])
 

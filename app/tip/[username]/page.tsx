@@ -1,6 +1,5 @@
 'use client'
-import React from 'react'
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { StripeCheckout } from './checkout'
 import { TopNav } from '@/components/nav'
@@ -42,6 +41,7 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
   const [success, setSuccess] = useState(false)
   const [myRequestStatus, setMyRequestStatus] = useState<string | null>(null)
   const [profileId, setProfileId] = useState<string | null>(null)
+  const profileIdRef = useRef<string | null>(null)
 
   const loadSession = useCallback(async (uid: string) => {
     const { data: s } = await supabase.from('sessions').select('*').eq('user_id', uid).eq('is_active', true).single()
@@ -67,6 +67,7 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
       }
       setProfile(profileData)
       setProfileId(profileData.id)
+      profileIdRef.current = profileData.id
       if (user) {
         setCurrentUser(user)
         const { data: u } = await supabase.from('users').select('display_name').eq('id', user.id).single()
@@ -86,7 +87,7 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
         () => loadSession(profileId))
       .subscribe()
     // Polling fallback every 5 seconds
-    const poll = setInterval(() => loadSession(profileId), 5000)
+    const poll = setInterval(() => { if (profileIdRef.current) loadSession(profileIdRef.current) }, 5000)
     return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [profileId, loadSession])
 
