@@ -155,11 +155,14 @@ export default function RequestsPage() {
         </div>
         {req.message && <p className="text-white/35 text-xs italic mb-2">"{req.message}"</p>}
         <p className="text-white/15 text-xs mb-2">Platform fee: {(req.platform_fee ?? req.amount * commissionRate).toFixed(2)} {currency} ({Math.round(commissionRate * 100)}%)</p>
-        {showActions && (
+        {showActions && !expiry?.includes('Expired') && (
           <div className="flex gap-1.5 mt-2">
             <button onClick={() => respond(req.id, 'accept')} disabled={acting === req.id} className="flex-1 bg-[#4AFFD4] text-[#08080C] py-2 rounded-lg text-xs font-bold hover:bg-[#6FFFDF] transition disabled:opacity-50">{acting === req.id ? '...' : 'Accept'}</button>
             <button onClick={() => respond(req.id, 'decline')} disabled={acting === req.id} className="flex-1 border border-red-500/20 text-red-400 py-2 rounded-lg text-xs hover:bg-red-500/[0.06] transition disabled:opacity-50">Decline</button>
           </div>
+        )}
+        {showActions && expiry?.includes('Expired') && (
+          <p className="text-white/20 text-xs mt-2 text-center">Auto-declining...</p>
         )}
         {!showActions && req.status === 'accepted' && displayStatus !== 'expired' && (
           <div className="mt-2 space-y-1.5">
