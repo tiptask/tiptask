@@ -29,21 +29,23 @@ export function TopNav() {
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null)
-      if (session?.user) {
-        const { data } = await supabase.from('users').select('display_name,username,tier').eq('id', session.user.id).single()
-        setProfile(data)
-      }
       setAuthReady(true)
+      if (session?.user) {
+        supabase.from('users').select('display_name,username,tier').eq('id', session.user.id).single()
+          .then(({ data }) => { if (data) setProfile(data) })
+          .catch(() => {})
+      }
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_, session) => {
       setUser(session?.user ?? null)
+      setAuthReady(true)
       if (session?.user) {
-        const { data } = await supabase.from('users').select('display_name,username,tier').eq('id', session.user.id).single()
-        setProfile(data)
+        supabase.from('users').select('display_name,username,tier').eq('id', session.user.id).single()
+          .then(({ data }) => { if (data) setProfile(data) })
+          .catch(() => {})
       } else {
         setProfile(null)
       }
-      setAuthReady(true)
     })
     return () => subscription.unsubscribe()
   }, [])
