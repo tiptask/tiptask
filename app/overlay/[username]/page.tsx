@@ -18,7 +18,7 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
 
   const sp = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
   const showQR = sp?.get('qr') !== '0'
-  const qrSize = parseInt(sp?.get('qrsize') || '200')
+  const qrSize = parseInt(sp?.get('qrsize') || '240')
   const qrLabel = sp?.get('label') || 'scan to tip'
 
   const [now, setNow] = useState(Date.now())
@@ -37,7 +37,6 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
     const json = await res.json()
     if (json.sessionId) setSessionId(json.sessionId)
 
-    // Pending first (oldest), then accepted (oldest, max 5)
     const mapTask = (r: any, status: 'pending' | 'accepted'): ActiveTask => ({
       id: r.id,
       type: r.custom_task_text ? 'custom' : 'task',
@@ -52,7 +51,6 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
       ...(json.accepted || []).map((r: any) => mapTask(r, 'accepted')),
     ])
 
-    // Tips
     const tips = json.tips || []
     if (tips.length > 0) {
       setLastTip({ id: tips[0].id, name: tips[0].sender_name, amount: tips[0].amount, currency: tips[0].currency, message: tips[0].message })
@@ -80,26 +78,14 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tips', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
           if (p.new.status === 'completed') {
             const { data } = await supabase.from('tips').select('*').eq('id', p.new.id).single()
-            if (data) {
-              addAlert({ type: 'tip', name: data.sender_name, amount: data.amount, currency: data.currency, message: data.message, duration: 10000 })
-            }
+            if (data) addAlert({ type: 'tip', name: data.sender_name, amount: data.amount, currency: data.currency, message: data.message, duration: 10000 })
             await fetchOverlayData()
           }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'task_requests', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
           if (p.new.status === 'pending') {
             const { data } = await supabase.from('task_requests').select('*, tasks(title)').eq('id', p.new.id).single()
-            if (data) {
-              addAlert({
-                type: data.custom_task_text ? 'custom' : 'task',
-                name: data.sender_name,
-                amount: data.amount,
-                currency: data.currency,
-                label: data.tasks?.title || data.custom_task_text,
-                message: data.message,
-                duration: 30000,
-              })
-            }
+            if (data) addAlert({ type: data.custom_task_text ? 'custom' : 'task', name: data.sender_name, amount: data.amount, currency: data.currency, label: data.tasks?.title || data.custom_task_text, message: data.message, duration: 30000 })
           }
           await fetchOverlayData()
         })
@@ -119,6 +105,7 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
 
   const tipUrl = `${origin}/${params.username}`
   const dotColor: Record<string, string> = { tip: '#FBBF24', task: '#4AFFD4', custom: '#A855F7' }
+  const colWidth = qrSize + 14
 
   const TipRow = ({ label, tip }: { label: string; tip: TipInfo }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -126,18 +113,36 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
       {tip ? (
         <>
           <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)' }}>{tip.name}</span>
-          {tip.message && (
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              "{tip.message}"
-            </span>
-          )}
+          {tip.message && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>"{tip.message}"</span>}
           <span style={{ fontSize: 12, fontWeight: 800, color: '#FBBF24', marginLeft: 'auto', paddingLeft: 8, whiteSpace: 'nowrap' }}>
             {tip.amount} <span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{tip.currency}</span>
           </span>
         </>
-      ) : (
-        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>—</span>
-      )}
+      ) : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>—</span>}
+    </div>
+  )
+
+  const TaskList = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+        <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#4AFFD4' }} />
+        <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(74,255,212,0.55)', letterSpacing: '0.10em', textTransform: 'uppercase' }}>
+          {activeTasks.filter(t => t.status === 'accepted').length} in progress · {activeTasks.filter(t => t.status === 'pending').length} pending
+        </span>
+      </div>
+      {activeTasks.map(t => {
+        const isPending = t.status === 'pending'
+        const accentColor = isPending ? '#FBBF24' : (t.type === 'custom' ? '#A855F7' : '#4AFFD4')
+        return (
+          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px', borderRadius: 7, background: isPending ? 'rgba(251,191,36,0.07)' : 'rgba(10,10,16,0.82)', backdropFilter: 'blur(16px)', borderLeft: `2px solid ${accentColor}50` }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: accentColor, flexShrink: 0 }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
+            <span style={{ fontSize: 11, fontWeight: 800, color: accentColor, flexShrink: 0, whiteSpace: 'nowrap' }}>
+              {t.amount} <span style={{ fontSize: 9, fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>{t.currency}</span>
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 
@@ -194,42 +199,17 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
 
         <div style={{ flex: 1 }} />
 
-        {/* Bottom row: QR + tasks */}
-        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-end', gap: 12 }}>
+        {/* Bottom: QR column with tasks stacked above */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: colWidth }}>
+          {activeTasks.length > 0 && <TaskList />}
           {showQR && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
               <div style={{ background: 'white', borderRadius: 10, padding: 7 }}>
                 <QRCode value={tipUrl} size={qrSize} />
               </div>
               {qrLabel && (
                 <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 600, textAlign: 'center' }}>{qrLabel}</span>
               )}
-            </div>
-          )}
-
-          {activeTasks.length > 0 && (
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
-                <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#4AFFD4' }} />
-                <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(74,255,212,0.55)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                  Tasks · {activeTasks.filter(t => t.status === 'accepted').length} in progress · {activeTasks.filter(t => t.status === 'pending').length} pending
-                </span>
-              </div>
-              {activeTasks.map(t => {
-                const isPending = t.status === 'pending'
-                const accentColor = isPending ? '#FBBF24' : (t.type === 'custom' ? '#A855F7' : '#4AFFD4')
-                return (
-                  <div key={t.id} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '5px 8px', borderRadius: 7, background: isPending ? 'rgba(251,191,36,0.07)' : 'rgba(10,10,16,0.82)', backdropFilter: 'blur(16px)', borderLeft: `2px solid ${accentColor}30` }}>
-                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: accentColor, flexShrink: 0, marginBottom: 1 }} />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: accentColor, flexShrink: 0, whiteSpace: 'nowrap' }}>
-                      {t.amount} <span style={{ fontSize: 9, fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>{t.currency}</span>
-                    </span>
-                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 400, whiteSpace: 'nowrap' }}>by {t.name}</span>
-                    {isPending && <span style={{ fontSize: 9, color: 'rgba(251,191,36,0.5)', fontWeight: 600, whiteSpace: 'nowrap' }}>pending</span>}
-                  </div>
-                )
-              })}
             </div>
           )}
         </div>
