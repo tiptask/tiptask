@@ -91,7 +91,7 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
     return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [profileId, loadSession])
 
-  // Realtime: watch specific request status once we have the ID
+  // Realtime + polling: watch specific request status once we have the ID
   useEffect(() => {
     if (!taskRequestId) return
     const channel = supabase.channel(`tip-request-${taskRequestId}-${Date.now()}`)
@@ -103,7 +103,13 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
         if (newStatus) setMyRequestStatus(newStatus)
       })
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+    // Polling fallback — check request status every 3 seconds
+    const poll = setInterval(async () => {
+      const { data } = await supabase
+        .from('task_requests').select('status').eq('id', taskRequestId).single()
+      if (data?.status) setMyRequestStatus(data.status)
+    }, 3000)
+    return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [taskRequestId])
 
   const currency = (profile?.currency || 'RON').toUpperCase()
