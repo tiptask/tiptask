@@ -11,30 +11,44 @@ export async function POST(req: NextRequest) {
     const { task_request_id } = await req.json()
     if (!task_request_id) return NextResponse.json({ error: 'Missing task_request_id' }, { status: 400 })
 
-    const { data: request } = await supabase
+    const { data: request, error: fetchError } = await supabase
       .from('task_requests').select('*').eq('id', task_request_id).single()
 
-    if (!request) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    if (request.status !== 'accepted')
-      return NextResponse.json({ error: 'Request not accepted' }, { status: 400 })
+    if (fetchError || !request) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
 
-    // Capture the payment
-    await stripe.paymentIntents.capture(request.stripe_payment_intent_id)
+    // Allow completing accepted OR expired-accepted requests
+    if (!['accepted'].includes(request.status)) {
+      return NextResponse.json({ error: `Cannot complete request with status: ${request.status}` }, { status: 400 })
+    }
 
-    await supabase.from('task_requests')
+    // Capture the Stripe payment
+    try {
+      await stripe.paymentIntents.capture(request.stripe_payment_intent_id)
+    } catch (stripeErr: any) {
+      console.error('Stripe capture error:', stripeErr)
+      // If already captured or cancelled, still mark as completed
+      if (!stripeErr.message?.includes('already captured') && !stripeErr.message?.includes('not in a capturable state')) {
+        return NextResponse.json({ error: 'Payment capture failed: ' + stripeErr.message }, { status: 500 })
+      }
+    }
+
+    const { error: updateError } = await supabase.from('task_requests')
       .update({ status: 'completed', completed_at: new Date().toISOString() })
       .eq('id', task_request_id)
+
+    if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
 
     // Update session stats
     if (request.session_id) {
       await supabase.rpc('update_session_request_stats', {
         p_session_id: request.session_id,
         p_amount: request.amount,
-      })
+      }).catch(console.error)
     }
 
     return NextResponse.json({ success: true })
   } catch (err: any) {
+    console.error('Complete error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
