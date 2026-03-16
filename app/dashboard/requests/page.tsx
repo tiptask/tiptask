@@ -19,6 +19,7 @@ export default function RequestsPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
+  const [mobileTab, setMobileTab] = useState<'requests' | 'tips'>('requests')
   const sessionIdRef = useRef<string | null>(null)
   const userIdRef = useRef<string | null>(null)
 
@@ -35,10 +36,13 @@ export default function RequestsPage() {
       const expiredPending = data.filter(r => r.status === 'pending' && r.expires_at && new Date(r.expires_at).getTime() <= now)
       const activeAccepted = data.filter(r => r.status === 'accepted' && (!r.expires_at || new Date(r.expires_at).getTime() > now))
       const expiredAccepted = data.filter(r => r.status === 'accepted' && r.expires_at && new Date(r.expires_at).getTime() <= now)
-      // Sort pending by expires_at ascending (soonest first)
-      setPending(activePending.sort((a, b) => new Date(a.expires_at||0).getTime() - new Date(b.expires_at||0).getTime()))
-      setAccepted(activeAccepted.sort((a, b) => new Date(a.expires_at||0).getTime() - new Date(b.expires_at||0).getTime()))
-      setDone([...expiredPending.map(r => ({ ...r, _display_status: 'expired_pending' })), ...expiredAccepted.map(r => ({ ...r, _display_status: 'expired' })), ...data.filter(r => ['completed','declined','refunded'].includes(r.status))])
+      setPending(activePending.sort((a, b) => new Date(a.expires_at || 0).getTime() - new Date(b.expires_at || 0).getTime()))
+      setAccepted(activeAccepted.sort((a, b) => new Date(a.expires_at || 0).getTime() - new Date(b.expires_at || 0).getTime()))
+      setDone([
+        ...expiredPending.map(r => ({ ...r, _display_status: 'expired_pending' })),
+        ...expiredAccepted.map(r => ({ ...r, _display_status: 'expired' })),
+        ...data.filter(r => ['completed', 'declined', 'refunded'].includes(r.status))
+      ])
       if (expiredPending.length > 0) fetch('/api/payments/auto-decline', { method: 'POST' }).catch(() => {})
     }
   }, [])
@@ -88,7 +92,6 @@ export default function RequestsPage() {
     return () => { supabase.removeChannel(channel); supabase.removeChannel(tipsChannel); clearInterval(poll) }
   }, [userId, loadRequests, loadTips])
 
-  // Move expired to done on tick
   useEffect(() => {
     const now = Date.now()
     setPending(prev => {
@@ -148,8 +151,7 @@ export default function RequestsPage() {
     if (diff <= 0) return 'Expired'
     const mins = Math.floor(diff / 60000)
     const secs = Math.floor((diff % 60000) / 1000)
-    const isUrgent = diff < 3 * 60 * 1000
-    return { label: mins > 0 ? `${mins}m ${secs}s` : `${secs}s`, urgent: isUrgent }
+    return { label: mins > 0 ? `${mins}m ${secs}s` : `${secs}s`, urgent: diff < 3 * 60 * 1000 }
   }
 
   const currency = profile?.currency?.toUpperCase() ?? 'RON'
@@ -158,35 +160,46 @@ export default function RequestsPage() {
   const tipsFeesThisSession = recentTips.reduce((s, t) => s + (t.platform_fee ?? 0), 0)
   const tipsNetThisSession = tipsTotalThisSession - tipsFeesThisSession
 
-  const RequestCard = ({ req, showActions, isDone }: { req: any, showActions: boolean, isDone?: boolean }) => {
+  // Compact done row — no buttons, minimal info
+  const DoneRow = ({ req }: { req: any }) => {
+    const isCustom = !!req.custom_task_text
+    const label = req.tasks?.title || req.custom_task_text || 'Request'
+    const displayStatus = req._display_status || req.status
+
+    let statusLabel = ''
+    let statusColor = 'text-white/20'
+    if (displayStatus === 'completed') { statusLabel = 'done'; statusColor = 'text-[#4AFFD4]/40' }
+    else if (displayStatus === 'declined') { statusLabel = 'declined'; statusColor = 'text-red-400/40' }
+    else if (displayStatus === 'refunded') { statusLabel = 'refunded'; statusColor = 'text-white/20' }
+    else if (displayStatus === 'expired' || displayStatus === 'expired_pending') { statusLabel = 'expired'; statusColor = 'text-white/20' }
+
+    return (
+      <div className="flex items-center justify-between px-3 py-2 rounded-lg opacity-50 hover:opacity-70 transition-opacity">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs shrink-0">{isCustom ? '✏️' : '🎯'}</span>
+          <span className="text-white/40 text-xs truncate">{label}</span>
+          <span className="text-white/20 text-xs shrink-0">by {req.sender_name}</span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          <span className="text-white/25 text-xs">{req.amount} {currency}</span>
+          <span className={`text-xs font-medium ${statusColor}`}>{statusLabel}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Active request card — full with buttons
+  const RequestCard = ({ req, showActions }: { req: any, showActions: boolean }) => {
     const isCustom = !!req.custom_task_text
     const label = req.tasks?.title || req.custom_task_text || 'Request'
     const expiry = formatExpiry(req.expires_at)
     const creatorReceives = +(req.amount - (req.platform_fee ?? req.amount * commissionRate)).toFixed(2)
-    const displayStatus = req._display_status || req.status
-    const isExpiredDisplay = displayStatus === 'expired_pending' || displayStatus === 'expired'
-
-    if (isExpiredDisplay) return (
-      <div className="flex items-center justify-between px-3 py-2 bg-white/[0.02] border border-white/[0.03] rounded-xl opacity-40">
-        <div className="min-w-0 flex items-center gap-2">
-          <span className="text-xs">{isCustom ? '✏️' : '🎯'}</span>
-          <div className="min-w-0">
-            <span className="text-white/40 text-xs truncate">{label}</span>
-            <span className="text-white/20 text-xs ml-1">by {req.sender_name}</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-white/30 text-xs">{req.amount} {currency}</span>
-          <span className="bg-white/[0.04] text-white/25 text-xs px-1.5 py-0.5 rounded-full">expired</span>
-        </div>
-      </div>
-    )
 
     return (
-      <div className={`rounded-xl border p-3 transition ${showActions ? 'border-[#4AFFD4]/20 bg-[#4AFFD4]/[0.03]' : 'border-amber-500/20 bg-amber-500/[0.03]'}`}>
+      <div className={`rounded-xl border p-3 transition ${showActions ? 'border-amber-500/20 bg-amber-500/[0.03]' : 'border-[#4AFFD4]/20 bg-[#4AFFD4]/[0.03]'}`}>
         <div className="flex items-start justify-between gap-2 mb-1">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm">{isCustom ? '✏️' : '🎯'}</span>
+            <span className="text-sm shrink-0">{isCustom ? '✏️' : '🎯'}</span>
             <div className="min-w-0">
               <p className="font-semibold text-white text-sm truncate">{label}</p>
               <p className="text-white/40 text-xs">by {req.sender_name}</p>
@@ -214,7 +227,7 @@ export default function RequestsPage() {
               Decline
             </button>
           </div>
-        ) : !isDone ? (
+        ) : (
           <div className="space-y-1.5">
             <button onClick={() => complete(req.id)} disabled={acting === req.id}
               className="w-full bg-[#4AFFD4] text-[#08080C] py-2 rounded-lg text-xs font-bold hover:bg-[#6FFFDF] transition disabled:opacity-50">
@@ -238,21 +251,86 @@ export default function RequestsPage() {
               </button>
             )}
           </div>
-        ) : null}
+        )}
       </div>
     )
   }
 
-  if (loading) return (<><TopNav /><main className="min-h-screen bg-[#08080C] flex items-center justify-center pt-12"><div className="w-5 h-5 border-2 border-white/[0.08] border-t-[#4AFFD4] rounded-full animate-spin" /></main></>)
+  const TipsPanel = () => (
+    <div className="space-y-3">
+      {/* Tips totals */}
+      <div className="bg-[#111117] border border-white/[0.06] rounded-xl p-3">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-white/50 text-xs font-semibold uppercase tracking-widest">💸 Tips</h2>
+          <span className="text-white/25 text-xs">{recentTips.length}</span>
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-xs">
+            <span className="text-white/30">Total</span>
+            <span className="text-amber-400 font-bold">{tipsTotalThisSession.toFixed(0)} {currency}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-white/30">Fees</span>
+            <span className="text-red-400/60">−{tipsFeesThisSession.toFixed(2)}</span>
+          </div>
+          <div className="h-px bg-white/[0.06]" />
+          <div className="flex justify-between text-xs">
+            <span className="text-white/60 font-medium">You got</span>
+            <span className="text-[#4AFFD4] font-bold">{tipsNetThisSession.toFixed(2)}</span>
+          </div>
+        </div>
+        <a href="/dashboard/payments" className="flex items-center justify-between bg-white/[0.03] border border-white/[0.05] rounded-lg px-2 py-1.5 mt-2 hover:bg-[#4AFFD4]/[0.05] hover:border-[#4AFFD4]/10 transition group">
+          <div>
+            <p className="text-white/30 text-xs capitalize">{profile?.tier || 'starter'} · {Math.round((profile?.custom_commission_rate ?? 0.15) * 100)}% fee</p>
+            <p className="text-white/20 text-xs">Upgrade for lower fees →</p>
+          </div>
+          <span className="text-white/15 group-hover:text-[#4AFFD4] transition text-xs">⚡</span>
+        </a>
+      </div>
+
+      {/* Tips feed */}
+      {recentTips.length === 0 ? (
+        <div className="bg-[#111117] border border-white/[0.06] rounded-xl p-4 text-center">
+          <p className="text-white/20 text-xs">No tips yet</p>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {recentTips.map((tip, i) => (
+            <div key={tip.id} className={`rounded-xl border px-3 py-2.5 ${i === 0 ? 'bg-amber-500/[0.06] border-amber-500/20' : 'bg-[#111117] border-white/[0.04]'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-white text-xs font-medium truncate">{tip.sender_name} {i === 0 ? '🔥' : ''}</span>
+                <span className="text-amber-400 font-bold text-sm shrink-0 ml-2">{tip.amount}</span>
+              </div>
+              {tip.message && <p className="text-white/30 text-xs italic truncate">"{tip.message}"</p>}
+              <div className="flex justify-between mt-0.5">
+                <span className="text-white/15 text-xs">{new Date(tip.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="text-[#4AFFD4] text-xs">+{(tip.amount - (tip.platform_fee ?? 0)).toFixed(2)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 
   const allActive = [...pending, ...accepted]
-  const totalRequests = allActive.length + done.length
+
+  if (loading) return (
+    <>
+      <TopNav />
+      <main className="min-h-screen bg-[#08080C] flex items-center justify-center pt-12">
+        <div className="w-5 h-5 border-2 border-white/[0.08] border-t-[#4AFFD4] rounded-full animate-spin" />
+      </main>
+    </>
+  )
 
   return (
     <>
       <TopNav />
       <main className="min-h-screen bg-[#08080C] pt-12 pb-20">
         <div className="max-w-5xl mx-auto p-4">
+
+          {/* Header */}
           <div className="flex items-center gap-3 mb-4">
             <BackButton href="/dashboard" />
             <h1 className="text-xl font-bold text-white">Live Session</h1>
@@ -262,125 +340,81 @@ export default function RequestsPage() {
                 <span className="text-[#4AFFD4] text-xs font-semibold">Live</span>
               </div>
             )}
-            <div className="ml-auto flex items-center gap-3 text-xs text-white/30">
-              <span>{allActive.length} active · {done.filter(r => r.status === 'completed').length} done</span>
+            <div className="ml-auto text-xs text-white/30">
+              {allActive.length} active · {done.filter(r => r.status === 'completed').length} done
             </div>
           </div>
 
-          {actError && <div className="bg-red-500/[0.08] border border-red-500/20 rounded-xl px-4 py-3 mb-4"><p className="text-red-400 text-sm">{actError}</p></div>}
+          {actError && (
+            <div className="bg-red-500/[0.08] border border-red-500/20 rounded-xl px-4 py-3 mb-4">
+              <p className="text-red-400 text-sm">{actError}</p>
+            </div>
+          )}
 
           {!session ? (
             <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-8 text-center">
               <p className="text-white/40 text-sm">No active session</p>
-              <button onClick={() => router.push('/dashboard/live')} className="mt-3 bg-[#4AFFD4] text-[#08080C] px-5 py-2 rounded-xl font-bold text-sm hover:bg-[#6FFFDF] transition">Start session →</button>
+              <button onClick={() => router.push('/dashboard/live')} className="mt-3 bg-[#4AFFD4] text-[#08080C] px-5 py-2 rounded-xl font-bold text-sm hover:bg-[#6FFFDF] transition">
+                Start session →
+              </button>
             </div>
           ) : (
-            {/* Mobile tabs */}
-          <div className="flex gap-1.5 mb-4 md:hidden">
-            <button id="tab-requests" onClick={() => { document.getElementById('col-requests')!.classList.remove('hidden'); document.getElementById('col-tips')!.classList.add('hidden'); document.getElementById('tab-requests')!.classList.add('text-[#4AFFD4]','border-[#4AFFD4]/20','bg-[#4AFFD4]/10'); document.getElementById('tab-requests')!.classList.remove('text-white/40','border-white/[0.06]','bg-white/[0.04]'); document.getElementById('tab-tips')!.classList.remove('text-[#4AFFD4]','border-[#4AFFD4]/20','bg-[#4AFFD4]/10'); document.getElementById('tab-tips')!.classList.add('text-white/40','border-white/[0.06]','bg-white/[0.04]'); }}
-              className="flex-1 py-2 rounded-xl text-xs font-semibold border transition text-[#4AFFD4] border-[#4AFFD4]/20 bg-[#4AFFD4]/10">
-              🎯 Requests {pending.length > 0 ? `(${pending.length})` : ''}
-            </button>
-            <button id="tab-tips" onClick={() => { document.getElementById('col-tips')!.classList.remove('hidden'); document.getElementById('col-requests')!.classList.add('hidden'); document.getElementById('tab-tips')!.classList.add('text-[#4AFFD4]','border-[#4AFFD4]/20','bg-[#4AFFD4]/10'); document.getElementById('tab-tips')!.classList.remove('text-white/40','border-white/[0.06]','bg-white/[0.04]'); document.getElementById('tab-requests')!.classList.remove('text-[#4AFFD4]','border-[#4AFFD4]/20','bg-[#4AFFD4]/10'); document.getElementById('tab-requests')!.classList.add('text-white/40','border-white/[0.06]','bg-white/[0.04]'); }}
-              className="flex-1 py-2 rounded-xl text-xs font-semibold border transition text-white/40 border-white/[0.06] bg-white/[0.04]">
-              💸 Tips {recentTips.length > 0 ? `(${recentTips.length})` : ''}
-            </button>
-          </div>
+            <>
+              {/* Mobile tabs */}
+              <div className="flex gap-1.5 mb-4 md:hidden">
+                <button
+                  onClick={() => setMobileTab('requests')}
+                  className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition ${mobileTab === 'requests' ? 'text-[#4AFFD4] border-[#4AFFD4]/20 bg-[#4AFFD4]/10' : 'text-white/40 border-white/[0.06] bg-white/[0.04]'}`}>
+                  🎯 Requests {pending.length > 0 ? `(${pending.length})` : ''}
+                </button>
+                <button
+                  onClick={() => setMobileTab('tips')}
+                  className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition ${mobileTab === 'tips' ? 'text-[#4AFFD4] border-[#4AFFD4]/20 bg-[#4AFFD4]/10' : 'text-white/40 border-white/[0.06] bg-white/[0.04]'}`}>
+                  💸 Tips {recentTips.length > 0 ? `(${recentTips.length})` : ''}
+                </button>
+              </div>
 
-          <div className="flex gap-4 items-start">
+              {/* Content */}
+              <div className="flex gap-4 items-start">
 
-              {/* LEFT: Requests — 70% */}
-              <div id="col-requests" className="flex-1 min-w-0 space-y-4">
+                {/* LEFT: Requests */}
+                <div className={`flex-1 min-w-0 space-y-4 ${mobileTab === 'tips' ? 'hidden md:block' : ''}`}>
 
-                {/* Active requests — pending + accepted, sorted by expiry */}
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <h2 className="text-white/50 text-xs font-semibold uppercase tracking-widest">Requests</h2>
-                    {pending.length > 0 && <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full font-bold">{pending.length} pending</span>}
-                    {accepted.length > 0 && <span className="bg-[#4AFFD4]/10 text-[#4AFFD4] text-xs px-1.5 py-0.5 rounded-full font-bold">{accepted.length} in progress</span>}
+                  {/* Active */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <h2 className="text-white/50 text-xs font-semibold uppercase tracking-widest">Requests</h2>
+                      {pending.length > 0 && <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full font-bold">{pending.length} pending</span>}
+                      {accepted.length > 0 && <span className="bg-[#4AFFD4]/10 text-[#4AFFD4] text-xs px-1.5 py-0.5 rounded-full font-bold">{accepted.length} in progress</span>}
+                    </div>
+                    {allActive.length === 0 ? (
+                      <p className="text-white/20 text-xs">No active requests</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {pending.map(r => <RequestCard key={r.id} req={r} showActions={true} />)}
+                        {accepted.map(r => <RequestCard key={r.id} req={r} showActions={false} />)}
+                      </div>
+                    )}
                   </div>
 
-                  {allActive.length === 0 ? (
-                    <p className="text-white/20 text-xs">No active requests</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {/* Pending (soonest expiry first) */}
-                      {pending.map(r => <RequestCard key={r.id} req={r} showActions={true} />)}
-                      {/* Accepted (soonest expiry first) */}
-                      {accepted.map(r => <RequestCard key={r.id} req={r} showActions={false} />)}
+                  {/* Done / Expired — compact rows */}
+                  {done.length > 0 && (
+                    <div>
+                      <h2 className="text-white/20 text-xs font-semibold uppercase tracking-widest mb-1">Done / Expired</h2>
+                      <div className="divide-y divide-white/[0.03]">
+                        {done.slice(0, 20).map(r => <DoneRow key={r.id} req={r} />)}
+                      </div>
                     </div>
                   )}
                 </div>
 
-                {/* Done / Expired */}
-                {done.length > 0 && (
-                  <div>
-                    <h2 className="text-white/30 text-xs font-semibold uppercase tracking-widest mb-2">Done / Expired</h2>
-                    <div className="space-y-1.5">
-                      {done.slice(0, 20).map(r => <RequestCard key={r.id} req={r} showActions={false} isDone={true} />)}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* RIGHT: Tips — 30% */}
-              <div id="col-tips" className="w-[30%] md:w-[30%] shrink-0 space-y-3 hidden md:block">
-                {/* Tips totals */}
-                <div className="bg-[#111117] border border-white/[0.06] rounded-xl p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <h2 className="text-white/50 text-xs font-semibold uppercase tracking-widest">💸 Tips</h2>
-                    <span className="text-white/25 text-xs">{recentTips.length}</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-white/30">Total</span>
-                      <span className="text-amber-400 font-bold">{tipsTotalThisSession.toFixed(0)} {currency}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-white/30">Fees</span>
-                      <span className="text-red-400/60">−{tipsFeesThisSession.toFixed(2)}</span>
-                    </div>
-                    <div className="h-px bg-white/[0.06]" />
-                    <div className="flex justify-between text-xs">
-                      <span className="text-white/60 font-medium">You got</span>
-                      <span className="text-[#4AFFD4] font-bold">{tipsNetThisSession.toFixed(2)}</span>
-                    </div>
-                  </div>
-                  {/* Upgrade nudge */}
-                  <a href="/dashboard/payments" className="flex items-center justify-between bg-white/[0.03] border border-white/[0.05] rounded-lg px-2 py-1.5 mt-2 hover:bg-[#4AFFD4]/[0.05] hover:border-[#4AFFD4]/10 transition group">
-                    <div>
-                      <p className="text-white/30 text-xs capitalize">{profile?.tier || 'starter'} · {Math.round((profile?.custom_commission_rate ?? 0.15) * 100)}% fee</p>
-                      <p className="text-white/20 text-xs">Upgrade for lower fees →</p>
-                    </div>
-                    <span className="text-white/15 group-hover:text-[#4AFFD4] transition text-xs">⚡</span>
-                  </a>
+                {/* RIGHT: Tips */}
+                <div className={`w-full md:w-[30%] shrink-0 ${mobileTab === 'requests' ? 'hidden md:block' : ''}`}>
+                  <TipsPanel />
                 </div>
 
-                {/* Tips feed */}
-                {recentTips.length === 0 ? (
-                  <div className="bg-[#111117] border border-white/[0.06] rounded-xl p-4 text-center">
-                    <p className="text-white/20 text-xs">No tips yet</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {recentTips.map((tip, i) => (
-                      <div key={tip.id} className={`rounded-xl border px-3 py-2.5 ${i === 0 ? 'bg-amber-500/[0.06] border-amber-500/20' : 'bg-[#111117] border-white/[0.04]'}`}>
-                        <div className="flex items-center justify-between">
-                          <span className="text-white text-xs font-medium truncate">{tip.sender_name} {i === 0 ? '🔥' : ''}</span>
-                          <span className="text-amber-400 font-bold text-sm shrink-0 ml-2">{tip.amount}</span>
-                        </div>
-                        {tip.message && <p className="text-white/30 text-xs italic truncate">"{tip.message}"</p>}
-                        <div className="flex justify-between mt-0.5">
-                          <span className="text-white/15 text-xs">{new Date(tip.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
-                          <span className="text-[#4AFFD4] text-xs">+{(tip.amount - (tip.platform_fee??0)).toFixed(2)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
-
-            </div>
+            </>
           )}
         </div>
       </main>
