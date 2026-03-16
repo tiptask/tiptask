@@ -200,14 +200,42 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
       <TopNav />
       <main className="min-h-screen bg-[#08080C] text-white flex items-center justify-center p-5 pt-16">
         <div className="max-w-sm w-full text-center">
-          <div className="w-14 h-14 rounded-full bg-[#4AFFD4]/10 border-2 border-[#4AFFD4]/20 flex items-center justify-center mx-auto mb-4 text-2xl">{tipId ? '💸' : '🎯'}</div>
-          <h2 className="text-xl font-bold mb-2">{tipId ? 'Tip sent!' : 'Request sent!'}</h2>
-          <p className="text-white/40 text-sm mb-2">{tipId ? `Thanks for supporting ${profile.display_name}` : `Waiting for ${profile.display_name} to accept...`}</p>
-          {!tipId && <p className="text-white/25 text-xs mb-6">This page will update automatically when they respond.</p>}
-          {tipId && <div className="space-y-2 mt-4">
-            <button onClick={resetAll} className="w-full bg-[#4AFFD4] text-[#08080C] py-3 rounded-2xl font-bold hover:bg-[#6FFFDF] transition text-sm">Send another</button>
-            <Link href={`/${profile.username}`} className="block w-full bg-white/[0.06] text-white/60 py-3 rounded-2xl font-medium hover:bg-white/[0.09] transition text-sm">← Back to profile</Link>
-          </div>}
+          {/* Request status update */}
+          {taskRequestId && myRequestStatus && myRequestStatus !== 'pending' && myRequestStatus !== 'draft' ? (
+            <>
+              <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
+                {myRequestStatus === 'accepted' ? '✅' : myRequestStatus === 'completed' ? '🎉' : myRequestStatus === 'declined' ? '❌' : '↩️'}
+              </div>
+              <h2 className="text-xl font-bold mb-2">
+                {myRequestStatus === 'accepted' ? 'Request accepted!' : myRequestStatus === 'completed' ? 'Done!' : myRequestStatus === 'declined' ? 'Request declined' : 'Request refunded'}
+              </h2>
+              <p className="text-white/40 text-sm mb-6">
+                {myRequestStatus === 'accepted' ? `${profile.display_name} is working on it!` : myRequestStatus === 'completed' ? 'Payment captured. Thanks!' : myRequestStatus === 'declined' ? 'Your payment has been refunded.' : 'Payment refunded to your card.'}
+              </p>
+              <button onClick={resetAll} className="w-full bg-[#4AFFD4] text-[#08080C] py-3 rounded-2xl font-bold hover:bg-[#6FFFDF] transition text-sm">Send another</button>
+            </>
+          ) : taskRequestId ? (
+            <>
+              <div className="w-14 h-14 rounded-full bg-[#4AFFD4]/10 border-2 border-[#4AFFD4]/20 flex items-center justify-center mx-auto mb-4 text-2xl">🎯</div>
+              <h2 className="text-xl font-bold mb-2">Request sent!</h2>
+              <p className="text-white/40 text-sm mb-2">Waiting for {profile.display_name} to accept...</p>
+              <p className="text-white/25 text-xs mb-6">This page updates automatically when they respond.</p>
+              <div className="flex items-center justify-center gap-2 mb-4">
+                <span className="w-2 h-2 bg-[#4AFFD4] rounded-full animate-pulse" />
+                <span className="text-[#4AFFD4] text-xs">Listening for updates...</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="w-14 h-14 rounded-full bg-[#4AFFD4]/10 border-2 border-[#4AFFD4]/20 flex items-center justify-center mx-auto mb-4 text-2xl">💸</div>
+              <h2 className="text-xl font-bold mb-2">Tip sent!</h2>
+              <p className="text-white/40 text-sm mb-4">Thanks for supporting {profile.display_name}</p>
+              <div className="space-y-2">
+                <button onClick={resetAll} className="w-full bg-[#4AFFD4] text-[#08080C] py-3 rounded-2xl font-bold hover:bg-[#6FFFDF] transition text-sm">Send another</button>
+                <Link href={`/${profile.username}`} className="block w-full bg-white/[0.06] text-white/60 py-3 rounded-2xl font-medium hover:bg-white/[0.09] transition text-sm">← Back to profile</Link>
+              </div>
+            </>
+          )}
         </div>
       </main>
     </>
