@@ -13,12 +13,11 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
   const [highTip, setHighTip] = useState<TipInfo>(null)
   const [activeTasks, setActiveTasks] = useState<ActiveTask[]>([])
   const [alerts, setAlerts] = useState<any[]>([])
-  const [sessionId, setSessionId] = useState<string | null>(null)
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
   const sp = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
   const showQR = sp?.get('qr') !== '0'
-  const qrSize = parseInt(sp?.get('qrsize') || '240')
+  const qrSize = parseInt(sp?.get('qrsize') || '280')
   const qrLabel = sp?.get('label') || 'scan to tip'
 
   const [now, setNow] = useState(Date.now())
@@ -35,7 +34,6 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
     const res = await fetch(`/api/overlay/data?username=${params.username}`)
     if (!res.ok) return null
     const json = await res.json()
-    if (json.sessionId) setSessionId(json.sessionId)
 
     const mapTask = (r: any, status: 'pending' | 'accepted'): ActiveTask => ({
       id: r.id,
@@ -105,49 +103,10 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
 
   const tipUrl = `${origin}/${params.username}`
   const dotColor: Record<string, string> = { tip: '#FBBF24', task: '#4AFFD4', custom: '#A855F7' }
-  const colWidth = qrSize + 14
-
-  const TipRow = ({ label, tip }: { label: string; tip: TipInfo }) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontSize: 10, fontWeight: 600, color: 'rgba(251,191,36,0.45)', minWidth: 72 }}>{label}</span>
-      {tip ? (
-        <>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)' }}>{tip.name}</span>
-          {tip.message && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>"{tip.message}"</span>}
-          <span style={{ fontSize: 12, fontWeight: 800, color: '#FBBF24', marginLeft: 'auto', paddingLeft: 8, whiteSpace: 'nowrap' }}>
-            {tip.amount} <span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{tip.currency}</span>
-          </span>
-        </>
-      ) : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>—</span>}
-    </div>
-  )
-
-  const TaskList = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
-        <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#4AFFD4' }} />
-        <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(74,255,212,0.55)', letterSpacing: '0.10em', textTransform: 'uppercase' }}>
-          {activeTasks.filter(t => t.status === 'accepted').length} in progress · {activeTasks.filter(t => t.status === 'pending').length} pending
-        </span>
-      </div>
-      {activeTasks.map(t => {
-        const isPending = t.status === 'pending'
-        const accentColor = isPending ? '#FBBF24' : (t.type === 'custom' ? '#A855F7' : '#4AFFD4')
-        return (
-          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px', borderRadius: 7, background: isPending ? 'rgba(251,191,36,0.07)' : 'rgba(10,10,16,0.82)', backdropFilter: 'blur(16px)', borderLeft: `2px solid ${accentColor}50` }}>
-            <span style={{ width: 5, height: 5, borderRadius: '50%', background: accentColor, flexShrink: 0 }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
-            <span style={{ fontSize: 11, fontWeight: 800, color: accentColor, flexShrink: 0, whiteSpace: 'nowrap' }}>
-              {t.amount} <span style={{ fontSize: 9, fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>{t.currency}</span>
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
+  const colWidth = qrSize + 14 // QR + padding
 
   return (
-    <div className="w-screen h-screen overflow-hidden relative" style={{ background: 'transparent', backgroundColor: 'transparent' }}>
+    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', position: 'relative', background: 'transparent' }}>
       <style>{`
         html,body{background:transparent!important;background-color:transparent!important;overflow:hidden;}
         *{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-sizing:border-box;}
@@ -157,20 +116,12 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
         .pulse-dot{animation:pulseDot 1.5s ease-in-out infinite}
       `}</style>
 
-      <div style={{ position: 'absolute', left: 16, top: 16, bottom: 16, width: 'calc(100vw - 32px)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-
-        {/* Last tip / Highest tip */}
-        {(lastTip || highTip) && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px', borderRadius: 8, background: 'rgba(10,10,16,0.70)', backdropFilter: 'blur(16px)' }}>
-            <TipRow label="Last tip:" tip={lastTip} />
-            <div style={{ height: 1, background: 'rgba(251,191,36,0.08)' }} />
-            <TipRow label="Highest tip:" tip={highTip} />
-          </div>
-        )}
+      {/* Single column bottom-left, all constrained to colWidth */}
+      <div style={{ position: 'absolute', left: 16, bottom: 16, width: colWidth, display: 'flex', flexDirection: 'column', gap: 6 }}>
 
         {/* Alerts */}
         {alerts.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: '40%', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {alerts.map(a => {
               const progress = Math.max(0, (a.expiresAt - now) / a.duration)
               const secs = Math.ceil((a.expiresAt - now) / 1000)
@@ -179,13 +130,13 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px' }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: dotColor[a.type] || '#4AFFD4', flexShrink: 0 }} />
                     <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', flexShrink: 0, fontWeight: 600 }}>{a.name}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {a.label || 'Tip'}{a.message ? ` — ${a.message}` : ''}
                     </span>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: dotColor[a.type] || '#4AFFD4', flexShrink: 0, whiteSpace: 'nowrap', marginLeft: 6 }}>
-                      {a.amount} <span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{a.currency}</span>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: dotColor[a.type] || '#4AFFD4', flexShrink: 0, whiteSpace: 'nowrap', marginLeft: 4 }}>
+                      {a.amount} <span style={{ fontSize: 9, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{a.currency}</span>
                     </span>
-                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.18)', flexShrink: 0, marginLeft: 4 }}>{secs}s</span>
+                    <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.18)', flexShrink: 0, marginLeft: 3 }}>{secs}s</span>
                     <button onClick={() => setAlerts(p => p.filter(x => x.id !== a.id))} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.18)', fontSize: 10, cursor: 'pointer', flexShrink: 0, padding: 0 }}>✕</button>
                   </div>
                   <div style={{ height: 2, background: 'rgba(255,255,255,0.05)' }}>
@@ -197,22 +148,63 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
           </div>
         )}
 
-        <div style={{ flex: 1 }} />
-
-        {/* Bottom: QR column with tasks stacked above */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: colWidth }}>
-          {activeTasks.length > 0 && <TaskList />}
-          {showQR && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-              <div style={{ background: 'white', borderRadius: 10, padding: 7 }}>
-                <QRCode value={tipUrl} size={qrSize} />
+        {/* Last/Highest tip */}
+        {(lastTip || highTip) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px', borderRadius: 8, background: 'rgba(10,10,16,0.70)', backdropFilter: 'blur(16px)' }}>
+            {lastTip && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'rgba(251,191,36,0.45)', minWidth: 68, flexShrink: 0 }}>Last tip:</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastTip.name}</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: '#FBBF24', flexShrink: 0, whiteSpace: 'nowrap' }}>{lastTip.amount} <span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{lastTip.currency}</span></span>
               </div>
-              {qrLabel && (
-                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 600, textAlign: 'center' }}>{qrLabel}</span>
-              )}
+            )}
+            {lastTip && highTip && <div style={{ height: 1, background: 'rgba(251,191,36,0.08)' }} />}
+            {highTip && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'rgba(251,191,36,0.45)', minWidth: 68, flexShrink: 0 }}>Highest:</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{highTip.name}</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: '#FBBF24', flexShrink: 0, whiteSpace: 'nowrap' }}>{highTip.amount} <span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{highTip.currency}</span></span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tasks */}
+        {activeTasks.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+              <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#4AFFD4' }} />
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(74,255,212,0.55)', letterSpacing: '0.10em', textTransform: 'uppercase' }}>
+                {activeTasks.filter(t => t.status === 'accepted').length} in progress · {activeTasks.filter(t => t.status === 'pending').length} pending
+              </span>
             </div>
-          )}
-        </div>
+            {activeTasks.map(t => {
+              const isPending = t.status === 'pending'
+              const accentColor = isPending ? '#FBBF24' : (t.type === 'custom' ? '#A855F7' : '#4AFFD4')
+              return (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px', borderRadius: 7, background: isPending ? 'rgba(251,191,36,0.07)' : 'rgba(10,10,16,0.82)', backdropFilter: 'blur(16px)', borderLeft: `2px solid ${accentColor}50` }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: accentColor, flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: accentColor, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                    {t.amount} <span style={{ fontSize: 9, fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>{t.currency}</span>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* QR */}
+        {showQR && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+            <div style={{ background: 'white', borderRadius: 10, padding: 7, width: '100%', display: 'flex', justifyContent: 'center' }}>
+              <QRCode value={tipUrl} size={qrSize} />
+            </div>
+            {qrLabel && (
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 600, textAlign: 'center' }}>{qrLabel}</span>
+            )}
+          </div>
+        )}
 
       </div>
     </div>
