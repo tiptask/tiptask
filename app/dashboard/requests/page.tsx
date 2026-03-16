@@ -38,11 +38,13 @@ export default function RequestsPage() {
       const expiredAccepted = data.filter(r => r.status === 'accepted' && r.expires_at && new Date(r.expires_at).getTime() <= now)
       setPending(activePending.sort((a, b) => new Date(a.expires_at || 0).getTime() - new Date(b.expires_at || 0).getTime()))
       setAccepted(activeAccepted.sort((a, b) => new Date(a.expires_at || 0).getTime() - new Date(b.expires_at || 0).getTime()))
-      setDone([
+      const doneArr = [
         ...expiredPending.map(r => ({ ...r, _display_status: 'expired_pending' })),
         ...expiredAccepted.map(r => ({ ...r, _display_status: 'expired' })),
         ...data.filter(r => ['completed', 'declined', 'refunded'].includes(r.status))
-      ])
+      ]
+      doneArr.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+      setDone(doneArr)
       if (expiredPending.length > 0) fetch('/api/payments/auto-decline', { method: 'POST' }).catch(() => {})
     }
   }, [])
