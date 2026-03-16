@@ -75,6 +75,8 @@ export default function RequestsPage() {
       .subscribe()
     const poll = setInterval(() => {
       if (sessionIdRef.current) {
+        // Auto-decline expired pending requests
+        fetch('/api/payments/auto-decline', { method: 'POST' }).catch(() => {})
         loadRequests(sessionIdRef.current)
         if (userIdRef.current) loadTips(sessionIdRef.current, userIdRef.current)
       }
