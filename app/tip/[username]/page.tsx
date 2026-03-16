@@ -40,6 +40,7 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
   const [taskRequestId, setTaskRequestId] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [myRequestStatus, setMyRequestStatus] = useState<string | null>(null)
+  const [isSelf, setIsSelf] = useState(false)
   const [profileId, setProfileId] = useState<string | null>(null)
   const profileIdRef = useRef<string | null>(null)
 
@@ -60,10 +61,9 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
         supabase.auth.getUser(),
       ])
       if (!profileData || !profileData.accepts_tips) { setLoading(false); return }
-      // Block self-tipping
+      // Block self-tipping - show message instead of redirect
       if (user && user.id === profileData.id) {
-        router.replace(`/dashboard`)
-        return
+        setIsSelf(true)
       }
       setProfile(profileData)
       setProfileId(profileData.id)
@@ -427,17 +427,28 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
           )}
 
           {error && <p className="text-red-400 text-xs px-1">{error}</p>}
+
+          {/* Self-tip banner */}
+          {isSelf && (
+            <div className="bg-amber-500/[0.08] border border-amber-500/20 rounded-xl px-4 py-3">
+              <p className="text-amber-400 text-sm font-medium">👀 This is your own page</p>
+              <p className="text-white/40 text-xs mt-0.5">You can preview how it looks to others, but you can't tip or request yourself.</p>
+            </div>
+          )}
         </div>
 
         {/* Sticky CTA */}
         <div className="fixed bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-[#08080C] via-[#08080C]/95 to-transparent pt-6 z-20">
           <div className="max-w-sm mx-auto">
-            <button onClick={activeZone === 'tip' ? handleTipSubmit : handleRequestSubmit} disabled={submitting || !canSubmit}
+            <button onClick={activeZone === 'tip' ? handleTipSubmit : handleRequestSubmit} disabled={submitting || !canSubmit || isSelf}
               className="w-full py-3.5 rounded-2xl font-bold text-sm transition-all disabled:opacity-30 bg-[#4AFFD4] text-[#08080C] hover:bg-[#6FFFDF] active:scale-[0.98]">
               {submitting ? 'Processing...' : !canSubmit ? 'Select an option above' :
                activeZone === 'tip' ? `💸 Pay ${totalToPay || amountNum || '0'} ${currency}` : `🎯 Pay ${totalToPay || amountNum || '0'} ${currency}`}
             </button>
-            <p className="text-center text-white/15 text-xs mt-1.5">{activeZone === 'tip' ? 'Secured by Stripe' : 'Full refund if declined · Stripe secured'}</p>
+            {isSelf
+              ? <p className="text-center text-amber-400/50 text-xs mt-1.5">Preview mode — you can't tip yourself</p>
+              : <p className="text-center text-white/15 text-xs mt-1.5">{activeZone === 'tip' ? 'Secured by Stripe' : 'Full refund if declined · Stripe secured'}</p>
+            }
           </div>
         </div>
       </main>
