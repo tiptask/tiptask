@@ -13,13 +13,15 @@ export async function GET(req: NextRequest) {
   if (!profile) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
   const { data: session } = await supabase.from('sessions').select('id').eq('user_id', profile.id).eq('is_active', true).single()
-  if (!session) return NextResponse.json({ sessionId: null, tasks: [], tips: [] })
+  if (!session) return NextResponse.json({ sessionId: null, pending: [], accepted: [], tips: [] })
 
-  const [{ data: tasks }, { data: tips }, { data: allTasks }] = await Promise.all([
-    supabase.from('task_requests').select('*, tasks(title)').eq('session_id', session.id).eq('status', 'accepted').order('updated_at', { ascending: true }).limit(5),
+  const now = new Date().toISOString()
+
+  const [{ data: pending }, { data: accepted }, { data: tips }] = await Promise.all([
+    supabase.from('task_requests').select('*, tasks(title)').eq('session_id', session.id).eq('status', 'pending').or('expires_at.is.null,expires_at.gt.' + now).order('created_at', { ascending: true }),
+    supabase.from('task_requests').select('*, tasks(title)').eq('session_id', session.id).eq('status', 'accepted').order('created_at', { ascending: true }).limit(5),
     supabase.from('tips').select('*').eq('session_id', session.id).eq('status', 'completed').order('created_at', { ascending: false }).limit(50),
-    supabase.from('task_requests').select('id, status, session_id, amount').eq('receiver_id', profile.id).order('created_at', { ascending: false }).limit(10),
   ])
 
-  return NextResponse.json({ sessionId: session.id, tasks: tasks || [], tips: tips || [], debug_all_tasks: allTasks || [] })
+  return NextResponse.json({ sessionId: session.id, pending: pending || [], accepted: accepted || [], tips: tips || [] })
 }
