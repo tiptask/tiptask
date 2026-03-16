@@ -19,9 +19,12 @@ export default function ProfileSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [convertingCurrency, setConvertingCurrency] = useState(false)
+  const [convertError, setConvertError] = useState<string | null>(null)
   const [displayName, setDisplayName] = useState('')
   const [bio, setBio] = useState('')
   const [currency, setCurrency] = useState('RON')
+  const [originalCurrency, setOriginalCurrency] = useState('RON')
   const [instagram, setInstagram] = useState('')
   const [tiktok, setTiktok] = useState('')
   const [youtube, setYoutube] = useState('')
@@ -40,6 +43,7 @@ export default function ProfileSettingsPage() {
         setDisplayName(p.display_name ?? '')
         setBio(p.bio ?? '')
         setCurrency(p.currency ?? 'RON')
+        setOriginalCurrency(p.currency ?? 'RON')
         setInstagram(p.instagram ?? '')
         setTiktok(p.tiktok ?? '')
         setYoutube(p.youtube ?? '')
@@ -56,12 +60,41 @@ export default function ProfileSettingsPage() {
   async function save() {
     if (!profile) return
     setSaving(true)
+    setConvertError(null)
+
+    // If currency changed, convert all existing records first
+    if (currency !== originalCurrency) {
+      setConvertingCurrency(true)
+      try {
+        const res = await fetch('/api/currency/convert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: profile.id, fromCurrency: originalCurrency, toCurrency: currency }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          setConvertError(data.error || 'Currency conversion failed')
+          setSaving(false)
+          setConvertingCurrency(false)
+          return
+        }
+      } catch (err: any) {
+        setConvertError(err.message || 'Currency conversion failed')
+        setSaving(false)
+        setConvertingCurrency(false)
+        return
+      }
+      setConvertingCurrency(false)
+    }
+
     await supabase.from('users').update({
       display_name: displayName,
       bio, currency, instagram, tiktok, youtube, twitch, website,
       accepts_tips: acceptsTips,
       custom_links: customLinks.filter(l => l.label && l.url),
     }).eq('id', profile.id)
+
+    setOriginalCurrency(currency)
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
@@ -70,6 +103,8 @@ export default function ProfileSettingsPage() {
   function updateLink(i: number, field: 'label' | 'url', val: string) {
     setCustomLinks(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l))
   }
+
+  const currencyChanged = currency !== originalCurrency
 
   if (loading) return (
     <>
@@ -146,6 +181,19 @@ export default function ProfileSettingsPage() {
                   className={inputCls}>
                   {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
+                {/* Warning when currency changed */}
+                {currencyChanged && (
+                  <div className="mt-2 bg-amber-500/[0.08] border border-amber-500/20 rounded-xl px-3 py-2.5">
+                    <p className="text-amber-400 text-xs">
+                      ⚠️ Changing from <strong>{originalCurrency}</strong> to <strong>{currency}</strong> will convert all your existing tips and requests using today's exchange rate.
+                    </p>
+                  </div>
+                )}
+                {convertError && (
+                  <div className="mt-2 bg-red-500/[0.08] border border-red-500/20 rounded-xl px-3 py-2.5">
+                    <p className="text-red-400 text-xs">❌ {convertError}</p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -216,7 +264,7 @@ export default function ProfileSettingsPage() {
               onClick={save}
               disabled={saving}
               className={`w-full py-4 rounded-2xl font-extrabold text-lg transition ${saved ? 'bg-[#4AFFD4]/20 text-[#4AFFD4] border border-[#4AFFD4]/30' : 'bg-[#4AFFD4] text-[#08080C] hover:bg-[#6FFFDF]'} disabled:opacity-50`}>
-              {saved ? '✓ Saved' : saving ? 'Saving...' : 'Save settings'}
+              {convertingCurrency ? '⟳ Converting currency...' : saved ? '✓ Saved' : saving ? 'Saving...' : 'Save settings'}
             </button>
 
             <button
