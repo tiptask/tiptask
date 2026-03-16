@@ -1,176 +1,148 @@
-# TipTask Context — polish-v1
+# TipTask Context — v2 (post-polish session)
 **Date:** 2026-03-16
-**Tag:** polish-v1
 **Live:** https://tiptask.me
 **Repo:** github.com/tiptask/tiptask
 **Local:** ~/Documents/tiptask
 
 ## Start Commands
 ```bash
-# Terminal 1
 cd ~/Documents/tiptask && npm run dev
-
-# Terminal 2 (webhooks)
-cd ~/Documents/tiptask && stripe listen --forward-to localhost:3002/api/webhooks/stripe
+# Terminal 2:
+stripe listen --forward-to localhost:3002/api/webhooks/stripe
 ```
 
 ## Stack
-- Next.js 15, Supabase, Stripe Connect, Tailwind v4, Resend
-- bcryptjs + jose (admin JWT auth)
-- react-qr-code
+Next.js 15, Supabase, Stripe Connect, Tailwind v4, Resend, bcryptjs, jose, react-qr-code
 
 ## Git Tags
 | Tag | Description |
 |-----|-------------|
-| best-working-version | First stable baseline |
-| obs-profile-v1 | OBS overlay + linktree profile |
-| pre-redesign-v1 | Last stable before major redesign |
-| redesign-v1 | Tips/requests separated + fan system |
-| polish-v1 | Full platform — tiers, admin, promo invites ← CURRENT |
+| polish-v1 | Full platform baseline |
+| (current) | Realtime, two-col session, auto-decline, tier system |
 
-## Database Tables
-- users (unified creators + fans)
-- sessions
-- tasks
-- task_requests
-- tips
-- follows
-- referral_earnings
-- promo_invites
-- admins
-
-## Tier System (Option D)
+## Tier System
 | Tier | Rate | How |
 |------|------|-----|
 | starter | 15% | Default |
-| rising | 12% | $1k lifetime OR $9/mo |
-| pro | 10% | $5k lifetime OR $19/mo |
-| elite | 8% | $20k lifetime OR $39/mo |
-| partner | 5% | $100k lifetime + approval |
-| promo | 0% | Invite only, X days |
-
-## Stripe Price IDs (TEST MODE)
-- Rising $9/mo: price_1TBPU9RP9yV1IeibNm3hz0pX
-- Pro $19/mo: price_1TBPUARP9yV1Ieibm8uNg2AD
-- Elite $39/mo: price_1TBPUBRP9yV1IeibhSEQmC9z
+| rising | 12% | $1k lifetime OR $9/mo (price_1TBPU9RP9yV1IeibNm3hz0pX) |
+| pro | 10% | $5k lifetime OR $19/mo (price_1TBPUARP9yV1Ieibm8uNg2AD) |
+| elite | 8% | $20k lifetime OR $39/mo (price_1TBPUBRP9yV1IeibhSEQmC9z) |
+| partner | 5% | $100k lifetime + manual approval |
+| promo | 0% | Invite-only, X days, via /invite/[code] |
 
 ## Fee Logic (Option D)
 - Below $5 / 25 RON: Stripe fee FORCED on payer
-- Above $5 / 25 RON: fee toggle OFF by default, payer can choose
+- Above: toggle OFF by default, payer can choose
 - Creator always receives: amount - platform_fee
-- Platform absorbs Stripe fee from its cut when viewer doesn't cover
+- Auto-decline: expired pending requests auto-cancelled + Stripe refund
 
-## App Structure
-```
-app/
-├── page.tsx                    ← Home with rotating taglines
-├── discover/page.tsx           ← Live, featured, top tipped/requested/tippers
-├── [username]/page.tsx         ← Public profile + follow + tip CTA
-├── tip/[username]/page.tsx     ← Tip + request form with fee toggle
-├── auth/login, register/       ← Unified auth (one page for all)
-├── invite/[code]/page.tsx      ← Promo invite registration
-├── ref/[code]/page.tsx         ← Referral redirect
-├── overlay/[username]/         ← OBS overlay (transparent bg)
-├── dashboard/
-│   ├── page.tsx                ← Main dashboard
-│   ├── live/page.tsx           ← Start/end session + QR + OBS
-│   ├── tips/page.tsx           ← Tips feed (session/today/all)
-│   ├── requests/page.tsx       ← Requests (pending/accepted/done) + extend
-│   ├── tasks/page.tsx          ← Manage task list
-│   ├── following/page.tsx      ← Followed creators + notify toggle
-│   ├── history/page.tsx        ← Tips sent + requests sent
-│   ├── payments/page.tsx       ← Stripe connect + tier upgrade
-│   ├── referrals/page.tsx      ← Referral link + earnings
-│   └── profile/page.tsx        ← Settings: bio, social, currency, accepts_tips
-├── admin/
-│   ├── login/page.tsx          ← Admin JWT login (separate from Supabase)
-│   ├── layout.tsx              ← Sidebar nav + auth check
-│   ├── page.tsx                ← Stats dashboard + charts
-│   ├── users/page.tsx          ← User management + edit modal
-│   ├── invites/page.tsx        ← Create/manage promo invite links
-│   └── sessions/page.tsx       ← Live sessions monitor
-└── api/
-    ├── auth/register/          ← Bypasses Supabase email via admin API
-    ├── admin/login,logout,verify,stats,users,invites,sessions/
-    ├── invite/[code]/          ← Validate promo invite
-    ├── tips/create/            ← Create tip PaymentIntent
-    ├── payments/
-    │   ├── create-intent/      ← Create request PaymentIntent (manual capture)
-    │   ├── confirm/            ← Confirm tip or request payment
-    │   ├── respond/            ← Accept/decline request
-    │   ├── complete/           ← Mark done + capture payment
-    │   ├── extend/             ← Extend request timer +5min
-    │   └── refund/             ← Cancel + refund
-    ├── stripe/
-    │   ├── connect/            ← Stripe Connect onboarding
-    │   ├── subscribe/          ← Stripe Checkout for subscriptions
-    │   └── cancel/             ← Cancel subscription (keeps until period end)
-    ├── webhooks/stripe/        ← Handles checkout.session.completed, subscription events
-    └── notifications/session-start/  ← Email followers via Resend
+## DB Tables
+users, sessions, tasks, task_requests, tips, follows,
+referral_earnings, promo_invites, admins
 
-## Key Env Vars
+## Key DB Notes
+- REPLICA IDENTITY FULL: tips, task_requests, sessions, follows
+- Trigger: recalculate_user_tier() on tip/request completion
+- Trigger: sync_user_live_status() on session start/end
+- users_tier_check: starter/rising/pro/elite/partner/promo/free/promoter/premium
+- Auto-decline: /api/payments/auto-decline (POST) - called on page load + every 4s poll
+
+## App Pages
 ```
-NEXT_PUBLIC_SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY
-SUPABASE_SERVICE_ROLE_KEY
-STRIPE_SECRET_KEY
-NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-STRIPE_WEBHOOK_SECRET
-STRIPE_RISING_PRICE_ID
-STRIPE_PRO_PRICE_ID
-STRIPE_ELITE_PRICE_ID
-NEXT_PUBLIC_STRIPE_RISING_PRICE_ID
-NEXT_PUBLIC_STRIPE_PRO_PRICE_ID
-NEXT_PUBLIC_STRIPE_ELITE_PRICE_ID
-RESEND_API_KEY
-NEXT_PUBLIC_APP_URL=https://tiptask.me
-ADMIN_JWT_SECRET
+/ — Home (rotating taglines, fee stats)
+/discover — Live now, featured, top tipped/requested/tippers
+/[username] — Profile (realtime session badge, follow, tip CTA)
+/tip/[username] — Tip + request form (fee toggle, self-tip blocked, realtime status)
+/invite/[code] — Promo invite registration (0% tier, auto accepts_tips=true)
+/auth/login, /auth/register — Unified auth
+/dashboard — Main (realtime stats, pending alert)
+/dashboard/live — Start/end session + QR + OBS
+/dashboard/requests — TWO COLUMN: requests (70%, soonest expiry first) + tips feed (30%), mobile tabs
+/dashboard/tips — Tips feed with session/today/all + net earnings breakdown (week/month/total)
+/dashboard/tasks — Manage task list
+/dashboard/following — Followed creators + notify toggle
+/dashboard/history — Tips sent + requests sent
+/dashboard/payments — Tier system, Stripe connect, subscription upgrade
+/dashboard/referrals — Referral link + earnings
+/dashboard/profile — Settings (bio, social, currency, accepts_tips toggle)
+/dashboard/sessions — MISSING - needs rebuild
+/overlay/[username] — OBS overlay (transparent bg, 600x800)
+/admin/login — JWT admin login
+/admin — Stats dashboard (charts, top creators, recent transactions)
+/admin/users — User management + edit modal (tier, featured, notes)
+/admin/invites — Create/manage promo invite links
+/admin/sessions — Live sessions monitor
 ```
 
-## Admin Panel
-- URL: tiptask.me/admin
-- Auth: separate JWT, stored in admins table (bcrypt passwords)
-- Admin account: marius.holeiciuc@gmail.com, role: super
+## Key API Routes
+```
+/api/auth/register — Bypasses Supabase email via admin API, handles promo_code
+/api/admin/login,logout,verify,stats,users,invites,sessions
+/api/invite/[code] — Validate promo invite
+/api/tips/create — Tip PaymentIntent (auto capture), cover_fee logic
+/api/payments/create-intent — Request PaymentIntent (manual capture)
+/api/payments/confirm — Confirm tip or request
+/api/payments/respond — Accept/decline request
+/api/payments/complete — Mark done + capture (handles already-captured gracefully)
+/api/payments/extend — +5 min timer
+/api/payments/auto-decline — Auto-decline expired pending requests + Stripe cancel
+/api/payments/refund — Cancel + refund
+/api/stripe/connect — Stripe Connect onboarding
+/api/stripe/subscribe — Stripe Checkout for subscriptions
+/api/stripe/cancel — Cancel subscription (keeps until period end)
+/api/webhooks/stripe — checkout.session.completed, subscription events
+/api/notifications/session-start — Email followers via Resend
+```
+
+## Realtime Strategy
+All key pages use: Supabase channel subscription + setInterval polling (3-5s fallback)
+- Uses useRef for sessionId/userId to avoid stale closure in intervals
+- Tip page: polls request status by ID every 3s after payment
+- Requests page: polls every 4s, auto-decline on each poll
+- Dashboard: polls every 5s for stats refresh
 
 ## Users
 | Username | Email | Tier | Notes |
 |----------|-------|------|-------|
 | marius | marius@bitson.ro | promoter | is_admin=true |
-| mh_disco | marius.holeiciuc@gmail.com | free | main creator test account |
+| mh_disco | marius.holeiciuc@gmail.com | free | creator test account |
 | anamaria | office@bitson.ro | free | test account |
+
+## Admin
+- URL: tiptask.me/admin/login
+- Email: marius.holeiciuc@gmail.com, role: super
+- JWT stored in cookie, 24h expiry
+
+## Env Vars Needed
+```
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY (legacy key from Supabase)
+STRIPE_SECRET_KEY
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+STRIPE_WEBHOOK_SECRET
+STRIPE_RISING_PRICE_ID + NEXT_PUBLIC_ version
+STRIPE_PRO_PRICE_ID + NEXT_PUBLIC_ version
+STRIPE_ELITE_PRICE_ID + NEXT_PUBLIC_ version
+RESEND_API_KEY
+NEXT_PUBLIC_APP_URL=https://tiptask.me
+ADMIN_JWT_SECRET
+```
 
 ## OBS Overlay
 - URL: tiptask.me/overlay/[username]
-- OBS: Width 600, Height 800
+- Width: 600, Height: 800
 - Custom CSS: body { background-color: rgba(0,0,0,0) !important; }
-- Params: ?qr=0 ?active=0 ?alerts=0 ?qrsize=220
+- Has own layout.tsx bypassing root layout
 
-## Known Issues / Pending for Next Session
-- [ ] Test admin panel fully (stats, user edit, invite creation)
-- [ ] Test promo invite flow end-to-end
-- [ ] Test tier upgrade via Stripe (Rising/Pro/Elite)
-- [ ] Test fee toggle on tip page (forced below 25 RON, optional above)
-- [ ] Test OBS overlay realtime updates
-- [ ] Verify webhook handles all subscription events correctly
-- [ ] Sessions history page (/dashboard/sessions) needs rebuild
-- [ ] Webhook: update to handle new tier names (rising/pro/elite vs promoter/premium)
-- [ ] Stripe webhook: map new price IDs to correct tiers
-- [ ] Test referral earnings flow
-- [ ] Test follow + session start notification email
-- [ ] Fix: tiptask.me domain redirect (should connect to Production not www redirect)
-
-## Supabase Notes
-- REPLICA IDENTITY FULL on: tips, task_requests, sessions, follows
-- Email confirmation: OFF
-- Auth trigger removed: on_auth_user_created_wallet (was causing 500 errors)
-- Auto tier recalculation trigger on tips + task_requests completion
-
-## Payment Flow
-**Tip:** POST /api/tips/create → PaymentIntent (auto capture) → confirm → completed
-**Request:** POST /api/payments/create-intent → PaymentIntent (manual capture) → pending → accept → complete → capture
-
-## Component: nav.tsx
-- TopNav: shows account dropdown when logged in (all dashboard links + tier + logout)
-- authReady state prevents flash of logged-out state
-- BottomNav: mobile only, shows when logged in
-- BackButton: uses router.back() or href
+## Pending Next Session
+- [ ] Sessions history page (/dashboard/sessions) - rebuild
+- [ ] Webhook: map new price IDs to tiers (rising/pro/elite)
+- [ ] Test OBS overlay with live session
+- [ ] Referral earnings flow end-to-end test
+- [ ] Resend domain verify (tiptask.me) for branded emails
+- [ ] Test promo invite full flow
+- [ ] Switch to Stripe live keys
+- [ ] Mobile polish on profile page
+- [ ] Admin: sessions page shows expired requests count
+- [ ] Consider: sessions tab showing per-session earnings history
