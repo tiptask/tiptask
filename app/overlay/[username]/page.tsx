@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import QRCode from 'react-qr-code'
 
 type TipInfo = { id: string; name: string; amount: number; currency: string; message?: string } | null
-type ActiveTask = { id: string; type: 'task' | 'custom'; label: string; name: string; amount: number; currency: string }
+type ActiveTask = { id: string; type: 'task' | 'custom'; label: string; name: string; amount: number; currency: string; status: 'pending' | 'accepted' }
 
 export default function OverlayPage({ params: paramsPromise }: { params: Promise<{ username: string }> }) {
   const params = React.use(paramsPromise)
@@ -33,19 +33,24 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
 
   async function fetchOverlayData() {
     const res = await fetch(`/api/overlay/data?username=${params.username}`)
-    if (!res.ok) return
+    if (!res.ok) return null
     const json = await res.json()
     if (json.sessionId) setSessionId(json.sessionId)
 
-    // Tasks
-    setActiveTasks((json.tasks || []).map((r: any) => ({
+    // Pending first (oldest), then accepted (oldest, max 5)
+    const mapTask = (r: any, status: 'pending' | 'accepted'): ActiveTask => ({
       id: r.id,
       type: r.custom_task_text ? 'custom' : 'task',
       label: r.tasks?.title || r.custom_task_text || 'Task',
       name: r.sender_name,
       amount: r.amount,
       currency: r.currency,
-    })))
+      status,
+    })
+    setActiveTasks([
+      ...(json.pending || []).map((r: any) => mapTask(r, 'pending')),
+      ...(json.accepted || []).map((r: any) => mapTask(r, 'accepted')),
+    ])
 
     // Tips
     const tips = json.tips || []
@@ -66,14 +71,11 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
       const sid = await fetchOverlayData()
       if (!sid) return
 
-      // Get profile id for realtime filter
       const { data: profile } = await supabase.from('users').select('id').eq('username', params.username).single()
       if (!profile) return
 
-      // Poll every 5s as fallback
       pollInterval = setInterval(fetchOverlayData, 5000)
 
-      // Realtime for live alerts only
       channel = supabase.channel(`overlay-${profile.id}-${Date.now()}`)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tips', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
           if (p.new.status === 'completed') {
@@ -84,7 +86,7 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
             await fetchOverlayData()
           }
         })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'task_requests', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'task_requests', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
           if (p.new.status === 'pending') {
             const { data } = await supabase.from('task_requests').select('*, tasks(title)').eq('id', p.new.id).single()
             if (data) {
@@ -192,7 +194,7 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
 
         <div style={{ flex: 1 }} />
 
-        {/* Bottom row: QR + active tasks */}
+        {/* Bottom row: QR + tasks */}
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-end', gap: 12 }}>
           {showQR && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -210,19 +212,24 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
                 <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#4AFFD4' }} />
                 <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(74,255,212,0.55)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                  In Progress · {activeTasks.length}
+                  Tasks · {activeTasks.filter(t => t.status === 'accepted').length} in progress · {activeTasks.filter(t => t.status === 'pending').length} pending
                 </span>
               </div>
-              {activeTasks.map(t => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '5px 8px', borderRadius: 7, background: 'rgba(10,10,16,0.82)', backdropFilter: 'blur(16px)' }}>
-                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: t.type === 'custom' ? '#A855F7' : '#4AFFD4', flexShrink: 0, marginBottom: 1 }} />
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: t.type === 'custom' ? '#C084FC' : '#4AFFD4', flexShrink: 0, whiteSpace: 'nowrap' }}>
-                    {t.amount} <span style={{ fontSize: 9, fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>{t.currency}</span>
-                  </span>
-                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 400, whiteSpace: 'nowrap' }}>by {t.name}</span>
-                </div>
-              ))}
+              {activeTasks.map(t => {
+                const isPending = t.status === 'pending'
+                const accentColor = isPending ? '#FBBF24' : (t.type === 'custom' ? '#A855F7' : '#4AFFD4')
+                return (
+                  <div key={t.id} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '5px 8px', borderRadius: 7, background: isPending ? 'rgba(251,191,36,0.07)' : 'rgba(10,10,16,0.82)', backdropFilter: 'blur(16px)', borderLeft: `2px solid ${accentColor}30` }}>
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: accentColor, flexShrink: 0, marginBottom: 1 }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: accentColor, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                      {t.amount} <span style={{ fontSize: 9, fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>{t.currency}</span>
+                    </span>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 400, whiteSpace: 'nowrap' }}>by {t.name}</span>
+                    {isPending && <span style={{ fontSize: 9, color: 'rgba(251,191,36,0.5)', fontWeight: 600, whiteSpace: 'nowrap' }}>pending</span>}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
