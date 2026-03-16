@@ -193,12 +193,6 @@ export default function DashboardPage() {
                     <span className="text-white/40 font-medium">You got</span>
                     <span className="text-[#4AFFD4] font-bold">{tipsNet.toFixed(2)} {currency}</span>
                   </div>
-
-                  {/* Tier + upgrade */}
-                  <Link href="/dashboard/payments" className="mt-2.5 flex items-center justify-between group/upgrade">
-                    <span className="text-white/25 text-[11px] capitalize">{tier} plan · {feePercent}% fee</span>
-                    <span className="text-[#4AFFD4]/40 text-[11px] font-medium group-hover/upgrade:text-[#4AFFD4]/70 transition">Upgrade →</span>
-                  </Link>
                 </Link>
 
                 {/* Requests */}
@@ -215,15 +209,15 @@ export default function DashboardPage() {
                     <span className="text-white/40 font-medium">You got</span>
                     <span className="text-[#4AFFD4] font-bold">{requestsNet.toFixed(2)} {currency}</span>
                   </div>
-
-                  {/* Tier + upgrade */}
-                  <Link href="/dashboard/payments" className="mt-2.5 flex items-center justify-between group/upgrade">
-                    <span className="text-white/25 text-[11px] capitalize">{tier} plan · {feePercent}% fee</span>
-                    <span className="text-[#4AFFD4]/40 text-[11px] font-medium group-hover/upgrade:text-[#4AFFD4]/70 transition">Upgrade →</span>
-                  </Link>
                 </Link>
 
               </div>
+
+              {/* Single tier + upgrade line below both cards */}
+              <Link href="/dashboard/payments" className="flex items-center justify-between px-1 -mt-2 mb-5 group/upgrade">
+                <span className="text-white/25 text-xs capitalize">{tier} plan · {feePercent}% fee on all earnings</span>
+                <span className="text-[#4AFFD4]/40 text-xs font-medium group-hover/upgrade:text-[#4AFFD4]/70 transition">Upgrade for lower fees →</span>
+              </Link>
             </>
           )}
 
