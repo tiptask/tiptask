@@ -158,7 +158,7 @@ export default function RequestsPage() {
   const tipsFeesThisSession = recentTips.reduce((s, t) => s + (t.platform_fee ?? 0), 0)
   const tipsNetThisSession = tipsTotalThisSession - tipsFeesThisSession
 
-  const RequestCard = ({ req, showActions }: { req: any, showActions: boolean }) => {
+  const RequestCard = ({ req, showActions, isDone }: { req: any, showActions: boolean, isDone?: boolean }) => {
     const isCustom = !!req.custom_task_text
     const label = req.tasks?.title || req.custom_task_text || 'Request'
     const expiry = formatExpiry(req.expires_at)
@@ -214,7 +214,7 @@ export default function RequestsPage() {
               Decline
             </button>
           </div>
-        ) : (
+        ) : !isDone ? (
           <div className="space-y-1.5">
             <button onClick={() => complete(req.id)} disabled={acting === req.id}
               className="w-full bg-[#4AFFD4] text-[#08080C] py-2 rounded-lg text-xs font-bold hover:bg-[#6FFFDF] transition disabled:opacity-50">
@@ -238,7 +238,7 @@ export default function RequestsPage() {
               </button>
             )}
           </div>
-        )}
+        ) : null}
       </div>
     )
   }
@@ -275,10 +275,22 @@ export default function RequestsPage() {
               <button onClick={() => router.push('/dashboard/live')} className="mt-3 bg-[#4AFFD4] text-[#08080C] px-5 py-2 rounded-xl font-bold text-sm hover:bg-[#6FFFDF] transition">Start session →</button>
             </div>
           ) : (
-            <div className="flex gap-4 items-start">
+            {/* Mobile tabs */}
+          <div className="flex gap-1.5 mb-4 md:hidden">
+            <button id="tab-requests" onClick={() => { document.getElementById('col-requests')!.classList.remove('hidden'); document.getElementById('col-tips')!.classList.add('hidden'); document.getElementById('tab-requests')!.classList.add('text-[#4AFFD4]','border-[#4AFFD4]/20','bg-[#4AFFD4]/10'); document.getElementById('tab-requests')!.classList.remove('text-white/40','border-white/[0.06]','bg-white/[0.04]'); document.getElementById('tab-tips')!.classList.remove('text-[#4AFFD4]','border-[#4AFFD4]/20','bg-[#4AFFD4]/10'); document.getElementById('tab-tips')!.classList.add('text-white/40','border-white/[0.06]','bg-white/[0.04]'); }}
+              className="flex-1 py-2 rounded-xl text-xs font-semibold border transition text-[#4AFFD4] border-[#4AFFD4]/20 bg-[#4AFFD4]/10">
+              🎯 Requests {pending.length > 0 ? `(${pending.length})` : ''}
+            </button>
+            <button id="tab-tips" onClick={() => { document.getElementById('col-tips')!.classList.remove('hidden'); document.getElementById('col-requests')!.classList.add('hidden'); document.getElementById('tab-tips')!.classList.add('text-[#4AFFD4]','border-[#4AFFD4]/20','bg-[#4AFFD4]/10'); document.getElementById('tab-tips')!.classList.remove('text-white/40','border-white/[0.06]','bg-white/[0.04]'); document.getElementById('tab-requests')!.classList.remove('text-[#4AFFD4]','border-[#4AFFD4]/20','bg-[#4AFFD4]/10'); document.getElementById('tab-requests')!.classList.add('text-white/40','border-white/[0.06]','bg-white/[0.04]'); }}
+              className="flex-1 py-2 rounded-xl text-xs font-semibold border transition text-white/40 border-white/[0.06] bg-white/[0.04]">
+              💸 Tips {recentTips.length > 0 ? `(${recentTips.length})` : ''}
+            </button>
+          </div>
+
+          <div className="flex gap-4 items-start">
 
               {/* LEFT: Requests — 70% */}
-              <div className="flex-1 min-w-0 space-y-4">
+              <div id="col-requests" className="flex-1 min-w-0 space-y-4">
 
                 {/* Active requests — pending + accepted, sorted by expiry */}
                 <div>
@@ -305,14 +317,14 @@ export default function RequestsPage() {
                   <div>
                     <h2 className="text-white/30 text-xs font-semibold uppercase tracking-widest mb-2">Done / Expired</h2>
                     <div className="space-y-1.5">
-                      {done.slice(0, 20).map(r => <RequestCard key={r.id} req={r} showActions={false} />)}
+                      {done.slice(0, 20).map(r => <RequestCard key={r.id} req={r} showActions={false} isDone={true} />)}
                     </div>
                   </div>
                 )}
               </div>
 
               {/* RIGHT: Tips — 30% */}
-              <div className="w-[30%] shrink-0 space-y-3">
+              <div id="col-tips" className="w-[30%] md:w-[30%] shrink-0 space-y-3 hidden md:block">
                 {/* Tips totals */}
                 <div className="bg-[#111117] border border-white/[0.06] rounded-xl p-3">
                   <div className="flex items-center justify-between mb-2">
