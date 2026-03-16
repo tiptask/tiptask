@@ -82,6 +82,7 @@ export default function DashboardPage() {
       if (s) {
         const { data: recentReqs } = await supabase.from('task_requests').select('*')
           .eq('session_id', s.id).eq('status', 'pending')
+          .or('expires_at.is.null,expires_at.gt.' + new Date().toISOString())
           .order('created_at', { ascending: false }).limit(5)
         setPendingRequests(recentReqs || [])
         const { data: tips } = await supabase.from('tips').select('*')
