@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       .sign(secret)
 
     const res = NextResponse.json({ success: true, name: admin.name, role: admin.role })
-    res.cookies.set('admin_token', token, { httpOnly: true, secure: true, sameSite: 'lax', maxAge: 86400, path: '/admin' })
+    res.cookies.set('admin_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 86400, path: '/' })
     return res
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
