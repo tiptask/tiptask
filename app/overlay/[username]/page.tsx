@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import QRCode from 'react-qr-code'
 
 type TipInfo = { id: string; name: string; amount: number; currency: string; message?: string } | null
-type ActiveTask = { id: string; type: 'task'|'custom'; label: string; name: string; amount: number; currency: string } | null
+type ActiveTask = { id: string; type: 'task' | 'custom'; label: string; name: string; amount: number; currency: string }
 
 export default function OverlayPage({ params: paramsPromise }: { params: Promise<{ username: string }> }) {
   const params = React.use(paramsPromise)
@@ -13,6 +13,7 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
   const [highTip, setHighTip] = useState<TipInfo>(null)
   const [activeTasks, setActiveTasks] = useState<ActiveTask[]>([])
   const [alerts, setAlerts] = useState<any[]>([])
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
   const sp = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
@@ -22,71 +23,130 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
 
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    const i = setInterval(() => { const t = Date.now(); setNow(t); setAlerts(p => p.filter(a => a.expiresAt > t)) }, 500)
+    const i = setInterval(() => {
+      const t = Date.now()
+      setNow(t)
+      setAlerts(p => p.filter(a => a.expiresAt > t))
+    }, 500)
     return () => clearInterval(i)
   }, [])
 
   useEffect(() => {
+    let channel: any = null
+
     async function load() {
       const { data: profile } = await supabase.from('users').select('*').eq('username', params.username).single()
       if (!profile) return
       const { data: session } = await supabase.from('sessions').select('*').eq('user_id', profile.id).eq('is_active', true).single()
       if (!session) return
 
+      setSessionId(session.id)
       await reloadTips(session.id)
       await reloadTasks(session.id)
 
-      supabase.channel(`overlay-${profile.id}-${Date.now()}`)
+      channel = supabase.channel(`overlay-${profile.id}-${Date.now()}`)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tips', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
           if (p.new.status === 'completed') {
             const { data } = await supabase.from('tips').select('*').eq('id', p.new.id).single()
-            if (data) { addAlert({ type: 'tip', name: data.sender_name, amount: data.amount, currency: data.currency, message: data.message, duration: 10000 }); await reloadTips(session.id) }
+            if (data) {
+              addAlert({ type: 'tip', name: data.sender_name, amount: data.amount, currency: data.currency, message: data.message, duration: 10000 })
+              await reloadTips(session.id)
+            }
           }
         })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'task_requests', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
-          const req = p.new
-          if (req.status === 'pending') {
-            const { data } = await supabase.from('task_requests').select('*, tasks(title)').eq('id', req.id).single()
-            if (data) addAlert({ type: data.custom_task_text ? 'custom' : 'task', name: data.sender_name, amount: data.amount, currency: data.currency, label: data.tasks?.title || data.custom_task_text, message: data.message, duration: 30000 })
+          const { data } = await supabase.from('task_requests').select('*, tasks(title)').eq('id', p.new.id).single()
+          if (!data) return
+          if (data.status === 'pending') {
+            addAlert({
+              type: data.custom_task_text ? 'custom' : 'task',
+              name: data.sender_name,
+              amount: data.amount,
+              currency: data.currency,
+              label: data.tasks?.title || data.custom_task_text,
+              message: data.message,
+              duration: 30000,
+            })
           }
-          if (['accepted','completed','declined','refunded'].includes(req.status)) await reloadTasks(session.id)
+          if (['accepted', 'completed', 'declined', 'refunded'].includes(data.status)) {
+            await reloadTasks(session.id)
+          }
         })
         .subscribe()
     }
+
     load()
+    return () => { if (channel) supabase.removeChannel(channel) }
   }, [params.username])
 
-  async function reloadTips(sessionId: string) {
-    const { data } = await supabase.from('tips').select('*').eq('session_id', sessionId).eq('status', 'completed').order('created_at', { ascending: false })
+  async function reloadTips(sid: string) {
+    const { data } = await supabase.from('tips').select('*').eq('session_id', sid).eq('status', 'completed').order('created_at', { ascending: false })
     if (!data?.length) return
     setLastTip({ id: data[0].id, name: data[0].sender_name, amount: data[0].amount, currency: data[0].currency, message: data[0].message })
     const high = data.reduce((a, b) => b.amount > a.amount ? b : a)
     setHighTip({ id: high.id, name: high.sender_name, amount: high.amount, currency: high.currency, message: high.message })
   }
 
-  async function reloadTasks(sessionId: string) {
-    const { data } = await supabase.from('task_requests').select('*, tasks(title)').eq('session_id', sessionId).eq('status', 'accepted').order('responded_at', { ascending: true }).limit(5)
-    setActiveTasks((data || []).map(r => ({ id: r.id, type: r.custom_task_text ? 'custom' : 'task', label: r.tasks?.title || r.custom_task_text || 'Task', name: r.sender_name, amount: r.amount, currency: r.currency })))
+  async function reloadTasks(sid: string) {
+    const { data } = await supabase
+      .from('task_requests')
+      .select('*, tasks(title)')
+      .eq('session_id', sid)
+      .eq('status', 'accepted')
+      .order('updated_at', { ascending: true })
+      .limit(5)
+    setActiveTasks((data || []).map(r => ({
+      id: r.id,
+      type: r.custom_task_text ? 'custom' : 'task',
+      label: r.tasks?.title || r.custom_task_text || 'Task',
+      name: r.sender_name,
+      amount: r.amount,
+      currency: r.currency,
+    })))
   }
 
   function addAlert(a: any) {
     setAlerts(p => [...p, { ...a, id: a.name + Date.now(), expiresAt: Date.now() + a.duration }])
   }
 
-  const tipUrl = `${origin}/tip/${params.username}`
-  const dotColor: any = { tip: '#FBBF24', task: '#4AFFD4', custom: '#A855F7' }
+  const tipUrl = `${origin}/${params.username}`
+  const dotColor: Record<string, string> = { tip: '#FBBF24', task: '#4AFFD4', custom: '#A855F7' }
 
-  const TipRow = ({ label, tip }: { label: string, tip: TipInfo }) => (
+  const TipRow = ({ label, tip }: { label: string; tip: TipInfo }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <span style={{ fontSize: 10, fontWeight: 600, color: 'rgba(251,191,36,0.45)', minWidth: 72 }}>{label}</span>
-      {tip ? (<><span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)' }}>{tip.name}</span>{tip.message && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>"{tip.message}"</span>}<span style={{ fontSize: 12, fontWeight: 800, color: '#FBBF24', marginLeft: 'auto', paddingLeft: 8, whiteSpace: 'nowrap' }}>{tip.amount} <span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{tip.currency}</span></span></>) : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>—</span>}
+      {tip ? (
+        <>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)' }}>{tip.name}</span>
+          {tip.message && (
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              "{tip.message}"
+            </span>
+          )}
+          <span style={{ fontSize: 12, fontWeight: 800, color: '#FBBF24', marginLeft: 'auto', paddingLeft: 8, whiteSpace: 'nowrap' }}>
+            {tip.amount} <span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{tip.currency}</span>
+          </span>
+        </>
+      ) : (
+        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>—</span>
+      )}
     </div>
   )
 
   return (
     <div className="w-screen h-screen overflow-hidden relative" style={{ background: 'transparent', backgroundColor: 'transparent' }}>
-      <style>{`html,body{background:transparent!important;background-color:transparent!important;overflow:hidden;}*{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-sizing:border-box;}@keyframes slideDown{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0);opacity:1}}@keyframes pulseDot{0%,100%{opacity:.5}50%{opacity:1}}.slide-in{animation:slideDown .22s ease-out forwards}.pulse-dot{animation:pulseDot 1.5s ease-in-out infinite}`}</style>
+      <style>{`
+        html,body{background:transparent!important;background-color:transparent!important;overflow:hidden;}
+        *{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-sizing:border-box;}
+        @keyframes slideDown{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0);opacity:1}}
+        @keyframes pulseDot{0%,100%{opacity:.5}50%{opacity:1}}
+        .slide-in{animation:slideDown .22s ease-out forwards}
+        .pulse-dot{animation:pulseDot 1.5s ease-in-out infinite}
+      `}</style>
+
       <div style={{ position: 'absolute', left: 16, top: 16, bottom: 16, width: 'calc(100vw - 32px)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+        {/* Last tip / Highest tip */}
         {(lastTip || highTip) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px', borderRadius: 8, background: 'rgba(10,10,16,0.70)', backdropFilter: 'blur(16px)' }}>
             <TipRow label="Last tip:" tip={lastTip} />
@@ -94,6 +154,8 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
             <TipRow label="Highest tip:" tip={highTip} />
           </div>
         )}
+
+        {/* Alerts */}
         {alerts.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: '40%', overflow: 'hidden' }}>
             {alerts.map(a => {
@@ -104,42 +166,61 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px' }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: dotColor[a.type] || '#4AFFD4', flexShrink: 0 }} />
                     <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', flexShrink: 0, fontWeight: 600 }}>{a.name}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.label || 'Tip'}{a.message ? ` — ${a.message}` : ''}</span>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: dotColor[a.type] || '#4AFFD4', flexShrink: 0, whiteSpace: 'nowrap', marginLeft: 6 }}>{a.amount} <span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{a.currency}</span></span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {a.label || 'Tip'}{a.message ? ` — ${a.message}` : ''}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: dotColor[a.type] || '#4AFFD4', flexShrink: 0, whiteSpace: 'nowrap', marginLeft: 6 }}>
+                      {a.amount} <span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.28)' }}>{a.currency}</span>
+                    </span>
                     <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.18)', flexShrink: 0, marginLeft: 4 }}>{secs}s</span>
                     <button onClick={() => setAlerts(p => p.filter(x => x.id !== a.id))} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.18)', fontSize: 10, cursor: 'pointer', flexShrink: 0, padding: 0 }}>✕</button>
                   </div>
-                  <div style={{ height: 2, background: 'rgba(255,255,255,0.05)' }}><div style={{ height: '100%', width: `${progress * 100}%`, background: dotColor[a.type] || '#4AFFD4', transition: 'width .5s linear' }} /></div>
+                  <div style={{ height: 2, background: 'rgba(255,255,255,0.05)' }}>
+                    <div style={{ height: '100%', width: `${progress * 100}%`, background: dotColor[a.type] || '#4AFFD4', transition: 'width .5s linear' }} />
+                  </div>
                 </div>
               )
             })}
           </div>
         )}
+
         <div style={{ flex: 1 }} />
+
+        {/* Bottom row: QR + active tasks */}
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-end', gap: 12 }}>
           {showQR && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-              <div style={{ background: 'white', borderRadius: 10, padding: 7 }}><QRCode value={tipUrl} size={qrSize} /></div>
-              {qrLabel && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 600, textAlign: 'center' }}>{qrLabel}</span>}
+              <div style={{ background: 'white', borderRadius: 10, padding: 7 }}>
+                <QRCode value={tipUrl} size={qrSize} />
+              </div>
+              {qrLabel && (
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 600, textAlign: 'center' }}>{qrLabel}</span>
+              )}
             </div>
           )}
+
           {activeTasks.length > 0 && (
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
                 <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#4AFFD4' }} />
-                <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(74,255,212,0.55)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>In Progress · {activeTasks.length}</span>
+                <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(74,255,212,0.55)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                  In Progress · {activeTasks.length}
+                </span>
               </div>
               {activeTasks.map(t => (
-                <div key={t?.id} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '5px 8px', borderRadius: 7, background: 'rgba(10,10,16,0.82)', backdropFilter: 'blur(16px)' }}>
-                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: t?.type === 'custom' ? '#A855F7' : '#4AFFD4', flexShrink: 0, marginBottom: 1 }} />
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t?.label}</span>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: t?.type === 'custom' ? '#C084FC' : '#4AFFD4', flexShrink: 0, whiteSpace: 'nowrap' }}>{t?.amount} <span style={{ fontSize: 9, fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>{t?.currency}</span></span>
-                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 400, whiteSpace: 'nowrap' }}>by {t?.name}</span>
+                <div key={t.id} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '5px 8px', borderRadius: 7, background: 'rgba(10,10,16,0.82)', backdropFilter: 'blur(16px)' }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: t.type === 'custom' ? '#A855F7' : '#4AFFD4', flexShrink: 0, marginBottom: 1 }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'white', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: t.type === 'custom' ? '#C084FC' : '#4AFFD4', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                    {t.amount} <span style={{ fontSize: 9, fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>{t.currency}</span>
+                  </span>
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 400, whiteSpace: 'nowrap' }}>by {t.name}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
+
       </div>
     </div>
   )
