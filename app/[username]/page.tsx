@@ -17,6 +17,15 @@ const SOCIAL_CONFIG: Record<string, { label: string; icon: string; base: string 
 export default function ProfilePage({ params: paramsPromise }: { params: Promise<{ username: string }> }) {
   const params = React.use(paramsPromise)
   const router = useRouter()
+
+  // Redirect reserved routes away from username handler
+  const RESERVED = ['admin','api','auth','dashboard','discover','tip','overlay','ref','invite','fan']
+  useEffect(() => {
+    if (RESERVED.includes(params.username)) {
+      router.replace('/' + params.username)
+    }
+  }, [params.username])
+  if (RESERVED.includes(params.username)) return null
   const [profile, setProfile] = useState<any>(null)
   const [session, setSession] = useState<any>(null)
   const [currentUser, setCurrentUser] = useState<any>(null)
