@@ -40,10 +40,12 @@ export async function POST(req: NextRequest) {
 
     // Update session stats
     if (request.session_id) {
-      await supabase.rpc('update_session_request_stats', {
-        p_session_id: request.session_id,
-        p_amount: request.amount,
-      }).catch(console.error)
+      try {
+        await supabase.rpc('update_session_request_stats', {
+          p_session_id: request.session_id,
+          p_amount: request.amount,
+        })
+      } catch (e) { console.error('RPC error:', e) }
     }
 
     return NextResponse.json({ success: true })

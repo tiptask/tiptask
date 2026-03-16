@@ -60,6 +60,11 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
         supabase.auth.getUser(),
       ])
       if (!profileData || !profileData.accepts_tips) { setLoading(false); return }
+      // Block self-tipping
+      if (user && user.id === profileData.id) {
+        router.replace(`/dashboard`)
+        return
+      }
       setProfile(profileData)
       setProfileId(profileData.id)
       if (user) {
