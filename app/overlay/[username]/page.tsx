@@ -31,71 +31,14 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
     return () => clearInterval(i)
   }, [])
 
-  useEffect(() => {
-    let channel: any = null
+  async function fetchOverlayData() {
+    const res = await fetch(`/api/overlay/data?username=${params.username}`)
+    if (!res.ok) return
+    const json = await res.json()
+    if (json.sessionId) setSessionId(json.sessionId)
 
-    async function load() {
-      const { data: profile } = await supabase.from('users').select('*').eq('username', params.username).single()
-      if (!profile) return
-      const { data: session } = await supabase.from('sessions').select('*').eq('user_id', profile.id).eq('is_active', true).single()
-      if (!session) return
-
-      setSessionId(session.id)
-      await reloadTips(session.id)
-      await reloadTasks(session.id)
-
-      channel = supabase.channel(`overlay-${profile.id}-${Date.now()}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tips', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
-          if (p.new.status === 'completed') {
-            const { data } = await supabase.from('tips').select('*').eq('id', p.new.id).single()
-            if (data) {
-              addAlert({ type: 'tip', name: data.sender_name, amount: data.amount, currency: data.currency, message: data.message, duration: 10000 })
-              await reloadTips(session.id)
-            }
-          }
-        })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'task_requests', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
-          const { data } = await supabase.from('task_requests').select('*, tasks(title)').eq('id', p.new.id).single()
-          if (!data) return
-          if (data.status === 'pending') {
-            addAlert({
-              type: data.custom_task_text ? 'custom' : 'task',
-              name: data.sender_name,
-              amount: data.amount,
-              currency: data.currency,
-              label: data.tasks?.title || data.custom_task_text,
-              message: data.message,
-              duration: 30000,
-            })
-          }
-          if (['accepted', 'completed', 'declined', 'refunded'].includes(data.status)) {
-            await reloadTasks(session.id)
-          }
-        })
-        .subscribe()
-    }
-
-    load()
-    return () => { if (channel) supabase.removeChannel(channel) }
-  }, [params.username])
-
-  async function reloadTips(sid: string) {
-    const { data } = await supabase.from('tips').select('*').eq('session_id', sid).eq('status', 'completed').order('created_at', { ascending: false })
-    if (!data?.length) return
-    setLastTip({ id: data[0].id, name: data[0].sender_name, amount: data[0].amount, currency: data[0].currency, message: data[0].message })
-    const high = data.reduce((a, b) => b.amount > a.amount ? b : a)
-    setHighTip({ id: high.id, name: high.sender_name, amount: high.amount, currency: high.currency, message: high.message })
-  }
-
-  async function reloadTasks(sid: string) {
-    const { data } = await supabase
-      .from('task_requests')
-      .select('*, tasks(title)')
-      .eq('session_id', sid)
-      .eq('status', 'accepted')
-      .order('updated_at', { ascending: true })
-      .limit(5)
-    setActiveTasks((data || []).map(r => ({
+    // Tasks
+    setActiveTasks((json.tasks || []).map((r: any) => ({
       id: r.id,
       type: r.custom_task_text ? 'custom' : 'task',
       label: r.tasks?.title || r.custom_task_text || 'Task',
@@ -103,7 +46,70 @@ export default function OverlayPage({ params: paramsPromise }: { params: Promise
       amount: r.amount,
       currency: r.currency,
     })))
+
+    // Tips
+    const tips = json.tips || []
+    if (tips.length > 0) {
+      setLastTip({ id: tips[0].id, name: tips[0].sender_name, amount: tips[0].amount, currency: tips[0].currency, message: tips[0].message })
+      const high = tips.reduce((a: any, b: any) => b.amount > a.amount ? b : a)
+      setHighTip({ id: high.id, name: high.sender_name, amount: high.amount, currency: high.currency, message: high.message })
+    }
+
+    return json.sessionId as string | null
   }
+
+  useEffect(() => {
+    let channel: any = null
+    let pollInterval: any = null
+
+    async function load() {
+      const sid = await fetchOverlayData()
+      if (!sid) return
+
+      // Get profile id for realtime filter
+      const { data: profile } = await supabase.from('users').select('id').eq('username', params.username).single()
+      if (!profile) return
+
+      // Poll every 5s as fallback
+      pollInterval = setInterval(fetchOverlayData, 5000)
+
+      // Realtime for live alerts only
+      channel = supabase.channel(`overlay-${profile.id}-${Date.now()}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tips', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
+          if (p.new.status === 'completed') {
+            const { data } = await supabase.from('tips').select('*').eq('id', p.new.id).single()
+            if (data) {
+              addAlert({ type: 'tip', name: data.sender_name, amount: data.amount, currency: data.currency, message: data.message, duration: 10000 })
+            }
+            await fetchOverlayData()
+          }
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'task_requests', filter: `receiver_id=eq.${profile.id}` }, async (p) => {
+          if (p.new.status === 'pending') {
+            const { data } = await supabase.from('task_requests').select('*, tasks(title)').eq('id', p.new.id).single()
+            if (data) {
+              addAlert({
+                type: data.custom_task_text ? 'custom' : 'task',
+                name: data.sender_name,
+                amount: data.amount,
+                currency: data.currency,
+                label: data.tasks?.title || data.custom_task_text,
+                message: data.message,
+                duration: 30000,
+              })
+            }
+          }
+          await fetchOverlayData()
+        })
+        .subscribe()
+    }
+
+    load()
+    return () => {
+      if (channel) supabase.removeChannel(channel)
+      if (pollInterval) clearInterval(pollInterval)
+    }
+  }, [params.username])
 
   function addAlert(a: any) {
     setAlerts(p => [...p, { ...a, id: a.name + Date.now(), expiresAt: Date.now() + a.duration }])
