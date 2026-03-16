@@ -57,14 +57,15 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
     load()
   }, [params.username, loadSession])
 
-  // Realtime session updates
+  // Realtime + polling for session updates
   useEffect(() => {
     if (!profile?.id) return
-    const channel = supabase.channel(`profile-${profile.id}`)
+    const channel = supabase.channel(`profile-${profile.id}-${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `user_id=eq.${profile.id}` },
         () => loadSession(profile.id))
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+    const poll = setInterval(() => loadSession(profile.id), 5000)
+    return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [profile?.id, loadSession])
 
   async function handleFollow() {

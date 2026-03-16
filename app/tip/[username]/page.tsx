@@ -78,14 +78,16 @@ export default function TipPage({ params: paramsPromise }: { params: Promise<{ u
     load()
   }, [params.username, loadSession])
 
-  // Realtime: session changes
+  // Realtime + polling for session changes
   useEffect(() => {
     if (!profileId) return
     const channel = supabase.channel(`tip-session-${profileId}-${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `user_id=eq.${profileId}` },
         () => loadSession(profileId))
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+    // Polling fallback every 5 seconds
+    const poll = setInterval(() => loadSession(profileId), 5000)
+    return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [profileId, loadSession])
 
   // Realtime: watch specific request status once we have the ID

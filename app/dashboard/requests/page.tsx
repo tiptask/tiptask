@@ -61,18 +61,21 @@ export default function RequestsPage() {
     load()
   }, [router, loadRequests])
 
-  // Realtime — reload on any change to task_requests for this user
+  // Realtime + polling fallback every 4 seconds
   useEffect(() => {
     if (!userId) return
+    // Realtime
     const channel = supabase.channel(`requests-${userId}-${Date.now()}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'task_requests',
         filter: `receiver_id=eq.${userId}`,
-      }, () => {
-        if (sessionId) loadRequests(sessionId)
-      })
+      }, () => { if (sessionId) loadRequests(sessionId) })
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+    // Polling fallback
+    const poll = setInterval(() => {
+      if (sessionId) loadRequests(sessionId)
+    }, 4000)
+    return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [userId, sessionId, loadRequests])
 
   async function respond(id: string, action: 'accept' | 'decline') {
