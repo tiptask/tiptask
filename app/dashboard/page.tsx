@@ -188,25 +188,17 @@ export default function DashboardPage() {
                   <p className="text-amber-400 font-black text-2xl">{stats.tipsReceivedAmount.toFixed(0)}</p>
                   <p className="text-white/20 text-xs mb-3">{currency} · {stats.tipsReceivedCount} tips</p>
 
-                  {/* Fees breakdown */}
-                  <div className="border-t border-white/[0.05] pt-2.5 space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-white/25">Fees ({feePercent}%)</span>
-                      <span className="text-red-400/50">−{stats.tipsFees.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-white/40 font-medium">You got</span>
-                      <span className="text-[#4AFFD4] font-bold">{tipsNet.toFixed(2)}</span>
-                    </div>
+                  {/* Net */}
+                  <div className="border-t border-white/[0.05] pt-2.5 flex justify-between text-xs">
+                    <span className="text-white/40 font-medium">You got</span>
+                    <span className="text-[#4AFFD4] font-bold">{tipsNet.toFixed(2)} {currency}</span>
                   </div>
 
-                  {/* Upgrade CTA */}
-                  {tier !== 'elite' && tier !== 'partner' && (
-                    <div className="mt-2.5 flex items-center gap-1 bg-[#4AFFD4]/[0.04] border border-[#4AFFD4]/10 rounded-lg px-2 py-1.5 group-hover:border-[#4AFFD4]/20 transition">
-                      <span className="text-[10px]">⚡</span>
-                      <span className="text-[#4AFFD4]/50 text-[10px] font-medium">Upgrade for lower fees →</span>
-                    </div>
-                  )}
+                  {/* Tier + upgrade */}
+                  <Link href="/dashboard/payments" className="mt-2.5 flex items-center justify-between group/upgrade">
+                    <span className="text-white/25 text-[11px] capitalize">{tier} plan · {feePercent}% fee</span>
+                    <span className="text-[#4AFFD4]/40 text-[11px] font-medium group-hover/upgrade:text-[#4AFFD4]/70 transition">Upgrade →</span>
+                  </Link>
                 </Link>
 
                 {/* Requests */}
@@ -218,25 +210,17 @@ export default function DashboardPage() {
                   <p className="text-[#4AFFD4] font-black text-2xl">{stats.requestsAmount.toFixed(0)}</p>
                   <p className="text-white/20 text-xs mb-3">{currency} · {stats.requestsCount} done</p>
 
-                  {/* Fees breakdown */}
-                  <div className="border-t border-white/[0.05] pt-2.5 space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-white/25">Fees ({feePercent}%)</span>
-                      <span className="text-red-400/50">−{stats.requestsFees.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-white/40 font-medium">You got</span>
-                      <span className="text-[#4AFFD4] font-bold">{requestsNet.toFixed(2)}</span>
-                    </div>
+                  {/* Net */}
+                  <div className="border-t border-white/[0.05] pt-2.5 flex justify-between text-xs">
+                    <span className="text-white/40 font-medium">You got</span>
+                    <span className="text-[#4AFFD4] font-bold">{requestsNet.toFixed(2)} {currency}</span>
                   </div>
 
-                  {/* Upgrade CTA */}
-                  {tier !== 'elite' && tier !== 'partner' && (
-                    <div className="mt-2.5 flex items-center gap-1 bg-[#4AFFD4]/[0.04] border border-[#4AFFD4]/10 rounded-lg px-2 py-1.5 group-hover:border-[#4AFFD4]/20 transition">
-                      <span className="text-[10px]">⚡</span>
-                      <span className="text-[#4AFFD4]/50 text-[10px] font-medium">Upgrade for lower fees →</span>
-                    </div>
-                  )}
+                  {/* Tier + upgrade */}
+                  <Link href="/dashboard/payments" className="mt-2.5 flex items-center justify-between group/upgrade">
+                    <span className="text-white/25 text-[11px] capitalize">{tier} plan · {feePercent}% fee</span>
+                    <span className="text-[#4AFFD4]/40 text-[11px] font-medium group-hover/upgrade:text-[#4AFFD4]/70 transition">Upgrade →</span>
+                  </Link>
                 </Link>
 
               </div>
