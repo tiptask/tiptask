@@ -147,7 +147,8 @@ function PaymentsContent() {
       })
       const data = await res.json()
       if (data.success) {
-        setNotice({ type: 'info', msg: `Subscription cancelled. Your ${currentTier} plan stays active until ${new Date(data.period_end).toLocaleDateString()}, then reverts to your earned tier.` })
+        const until = data.period_end ? ` until ${new Date(data.period_end).toLocaleDateString()}` : ''
+        setNotice({ type: 'info', msg: `Subscription cancelled. Your ${currentTier} plan stays active${until}, then reverts to your earned tier.` })
         if (userId) await reloadProfile(userId)
       } else {
         setNotice({ type: 'error', msg: data.error || 'Failed to cancel' })

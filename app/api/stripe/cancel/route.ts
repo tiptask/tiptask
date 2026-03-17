@@ -16,7 +16,10 @@ export async function POST(req: NextRequest) {
       cancel_at_period_end: true,
     })
 
-    const periodEnd = new Date((sub as any).current_period_end * 1000).toISOString()
+    // current_period_end is a unix timestamp
+    const periodEndTs = (sub as any).current_period_end
+    const periodEnd = periodEndTs ? new Date(periodEndTs * 1000).toISOString() : null
+
     await supabase.from('users').update({ sub_expires_at: periodEnd }).eq('id', user_id)
 
     return NextResponse.json({ success: true, period_end: periodEnd })
