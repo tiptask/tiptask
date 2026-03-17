@@ -56,30 +56,52 @@ function PaymentsContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [profile, setProfile] = useState<any>(null)
+  const [userId, setUserId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState(false)
   const [upgrading, setUpgrading] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [notice, setNotice] = useState<{ type: 'success' | 'info' | 'error', msg: string } | null>(null)
 
-  useEffect(() => {
-    const sub = searchParams.get('subscription')
-    const stripeParam = searchParams.get('stripe')
-    if (sub === 'success') setNotice({ type: 'success', msg: '🎉 Subscription activated! Your plan has been upgraded.' })
-    if (sub === 'cancelled') setNotice({ type: 'info', msg: 'Subscription cancelled — no charge made.' })
-    if (stripeParam === 'success') setNotice({ type: 'success', msg: '✓ Stripe account connected!' })
-  }, [searchParams])
+  async function reloadProfile(uid: string) {
+    const { data: p } = await supabase.from('users').select('*').eq('id', uid).single()
+    if (p) setProfile(p)
+    return p
+  }
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/auth/login'); return }
+      setUserId(user.id)
+
       const stripeParam = searchParams.get('stripe')
       if (stripeParam === 'success') {
         await supabase.from('users').update({ stripe_onboarded: true }).eq('id', user.id)
+        setNotice({ type: 'success', msg: '✓ Stripe account connected!' })
       }
-      const { data: p } = await supabase.from('users').select('*').eq('id', user.id).single()
-      setProfile(p)
+
+      const sub = searchParams.get('subscription')
+      if (sub === 'success') {
+        const sid = searchParams.get('session_id')
+        if (sid) {
+          const res = await fetch(`/api/stripe/subscribe?session_id=${sid}`)
+          const data = await res.json()
+          if (data.ok) {
+            setNotice({ type: 'success', msg: '🎉 Subscription activated! Your plan has been upgraded.' })
+            await reloadProfile(user.id)
+            setLoading(false)
+            return
+          }
+        }
+        setNotice({ type: 'success', msg: '🎉 Subscription activated! Your plan has been upgraded.' })
+      }
+
+      if (sub === 'cancelled') {
+        setNotice({ type: 'info', msg: 'Subscription checkout cancelled — no charge made.' })
+      }
+
+      await reloadProfile(user.id)
       setLoading(false)
     }
     load()
@@ -125,23 +147,25 @@ function PaymentsContent() {
       })
       const data = await res.json()
       if (data.success) {
-        setNotice({ type: 'info', msg: `Plan active until ${new Date(data.period_end).toLocaleDateString()}, then reverts to earned tier.` })
-        const { data: p } = await supabase.from('users').select('*').eq('id', profile.id).single()
-        setProfile(p)
+        setNotice({ type: 'info', msg: `Subscription cancelled. Your ${currentTier} plan stays active until ${new Date(data.period_end).toLocaleDateString()}, then reverts to your earned tier.` })
+        if (userId) await reloadProfile(userId)
+      } else {
+        setNotice({ type: 'error', msg: data.error || 'Failed to cancel' })
       }
     } catch (err: any) { setNotice({ type: 'error', msg: err.message }) }
     setCancelling(false)
   }
 
   const currentTier = profile?.tier || 'starter'
+  const currentTierName = currentTier.charAt(0).toUpperCase() + currentTier.slice(1)
   const commissionRate = profile?.custom_commission_rate ?? 0.15
+  const feePercent = Math.round(commissionRate * 100)
   const lifetimeEarned = profile?.lifetime_earned || 0
   const currency = profile?.currency || 'RON'
 
-  // Progress to next tier
   const tierThresholds = [0, 1000, 5000, 20000, 100000]
   const tierNames = ['starter', 'rising', 'pro', 'elite', 'partner']
-  const currentTierIdx = tierNames.indexOf(currentTier.replace('_sub',''))
+  const currentTierIdx = tierNames.indexOf(currentTier.replace('_sub', ''))
   const nextThreshold = tierThresholds[Math.min(currentTierIdx + 1, tierThresholds.length - 1)]
   const prevThreshold = tierThresholds[Math.max(currentTierIdx, 0)]
   const progress = nextThreshold > prevThreshold
@@ -189,12 +213,12 @@ function PaymentsContent() {
           </button>
         </div>
 
-        {/* Current status */}
+        {/* Current tier */}
         <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-5 mb-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-bold text-white">Your Tier</h2>
             <span className={`font-bold capitalize text-sm ${TIER_COLORS[currentTier] || 'text-white/40'}`}>
-              {currentTier === 'promo' ? '🚀 Promo' : currentTier}
+              {currentTier === 'promo' ? '🚀 Promo' : currentTierName}
             </span>
           </div>
 
@@ -207,14 +231,13 @@ function PaymentsContent() {
 
           <div className="flex justify-between items-center mb-1">
             <span className="text-white/40 text-sm">Current fee</span>
-            <span className="text-[#4AFFD4] font-bold">{Math.round(commissionRate * 100)}%</span>
+            <span className="text-[#4AFFD4] font-bold">{feePercent}%</span>
           </div>
           <div className="flex justify-between items-center mb-4">
             <span className="text-white/40 text-sm">Lifetime earned</span>
             <span className="text-white font-bold">${lifetimeEarned.toFixed(2)}</span>
           </div>
 
-          {/* Progress to next tier */}
           {currentTier !== 'partner' && currentTier !== 'promo' && (
             <div>
               <div className="flex justify-between text-xs text-white/30 mb-1.5">
@@ -237,7 +260,7 @@ function PaymentsContent() {
             {PLANS.map(plan => {
               const isCurrent = currentTier === plan.id || currentTier === plan.id + '_sub'
               const canSubscribe = plan.sub && !isCurrent && plan.id !== 'partner'
-              const isHigher = PLANS.findIndex(p => p.id === plan.id) > PLANS.findIndex(p => p.id === currentTier.replace('_sub',''))
+              const isHigher = PLANS.findIndex(p => p.id === plan.id) > PLANS.findIndex(p => p.id === currentTier.replace('_sub', ''))
 
               return (
                 <div key={plan.id} className={`rounded-2xl border p-4 transition ${isCurrent ? `${plan.color} bg-white/[0.02]` : 'border-white/[0.04] bg-[#08080C]'}`}>
@@ -251,7 +274,6 @@ function PaymentsContent() {
                   <p className={`text-sm mb-1 ${isCurrent ? 'text-white/60' : 'text-white/30'}`}>{plan.desc}</p>
                   <p className="text-white/20 text-xs mb-3">{plan.how}</p>
 
-                  {/* Earning example */}
                   <div className={`rounded-xl px-3 py-2 mb-3 ${isCurrent ? 'bg-white/[0.04]' : 'bg-white/[0.02]'}`}>
                     <p className="text-white/25 text-xs">
                       On 1,000 {currency} earned → you keep{' '}
@@ -269,9 +291,11 @@ function PaymentsContent() {
                   )}
 
                   {isCurrent && plan.id !== 'starter' && plan.id !== 'partner' && profile?.stripe_subscription_id && (
-                    <div className="space-y-2">
+                    <div className="space-y-2 mt-1">
                       {profile?.sub_expires_at && (
-                        <p className="text-white/25 text-xs text-center">Active until {new Date(profile.sub_expires_at).toLocaleDateString()}</p>
+                        <p className="text-white/25 text-xs text-center">
+                          Active until {new Date(profile.sub_expires_at).toLocaleDateString()}
+                        </p>
                       )}
                       <button onClick={cancelSubscription} disabled={cancelling}
                         className="w-full border border-red-500/20 text-red-400/60 hover:text-red-400 py-2 rounded-xl text-xs transition disabled:opacity-50">
@@ -285,18 +309,20 @@ function PaymentsContent() {
           </div>
         </div>
 
-        {/* Fee breakdown */}
+        {/* Fee explanation */}
         <div className="bg-[#111117] border border-white/[0.06] rounded-2xl p-5">
-          <h2 className="font-bold text-white mb-3">How fees work</h2>
-          <div className="space-y-2 text-sm text-white/40">
-            <p>• TipTask takes <span className="text-white/60">{Math.round(commissionRate * 100)}%</span> of each transaction</p>
-            <p>• Tips under 25 RON / $5: Stripe fee is required from payer</p>
-            <p>• Tips above 25 RON / $5: payer can optionally cover Stripe fee</p>
-            <p>• You always receive: tip amount − platform fee</p>
-            <p>• Payouts handled automatically via Stripe Connect</p>
-            <p>• Tier upgrades are automatic when you hit lifetime earnings thresholds</p>
+          <h2 className="font-bold text-white mb-1">How your {currentTierName} plan fees work</h2>
+          <p className="text-white/30 text-xs mb-4">Understanding what you pay and what you keep</p>
+          <div className="space-y-3 text-sm text-white/40">
+            <p>• TipTask takes <span className="text-white/70 font-semibold">{feePercent}%</span> of each transaction on your current <span className="text-white/70 font-semibold capitalize">{currentTierName}</span> plan</p>
+            <p>• <span className="text-white/60">Small tips (under 25 RON / $5):</span> The Stripe processing fee (~2.9% + $0.30) is added on top and paid by the tipper — you always receive the full amount minus only TipTask's {feePercent}% fee</p>
+            <p>• <span className="text-white/60">Larger tips (above 25 RON / $5):</span> The tipper can optionally choose to cover the Stripe fee. If they don't, TipTask absorbs it — either way, you receive tip amount minus {feePercent}%</p>
+            <p>• <span className="text-white/60">What you always receive:</span> tip amount − {feePercent}% TipTask fee. Stripe's processing fee never comes out of your pocket</p>
+            <p>• Payouts are handled automatically via Stripe Connect directly to your bank account</p>
+            <p>• Tier upgrades happen automatically when you hit lifetime earnings thresholds — no action needed</p>
           </div>
         </div>
+
       </div>
     </main>
   )
