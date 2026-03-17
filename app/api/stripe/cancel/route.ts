@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     })
 
     const periodEnd = new Date((sub as any).current_period_end * 1000).toISOString()
-    await supabase.from('users').update({ premium_expires_at: periodEnd }).eq('id', user_id)
+    await supabase.from('users').update({ sub_expires_at: periodEnd }).eq('id', user_id)
 
     return NextResponse.json({ success: true, period_end: periodEnd })
   } catch (err: any) {
