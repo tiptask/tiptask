@@ -26,7 +26,6 @@ export async function POST(req: NextRequest) {
     const { data: user } = await supabase.from('users').select('*').eq('id', user_id).single()
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
-    // Get or create Stripe customer
     let customerId = user.stripe_customer_id
     if (!customerId) {
       const customer = await stripe.customers.create({
@@ -38,7 +37,6 @@ export async function POST(req: NextRequest) {
       await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', user_id)
     }
 
-    // Cancel existing subscription if any
     if (user.stripe_subscription_id) {
       try {
         await stripe.subscriptions.update(user.stripe_subscription_id, { cancel_at_period_end: true })
@@ -62,40 +60,42 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Called after successful checkout to activate the subscription in DB
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const sessionId = searchParams.get('session_id')
     if (!sessionId) return NextResponse.json({ error: 'Missing session_id' }, { status: 400 })
 
-    const session = await stripe.checkout.sessions.retrieve(sessionId, {
-      expand: ['subscription'],
-    })
-
+    // Retrieve session
+    const session = await stripe.checkout.sessions.retrieve(sessionId)
     const userId = session.metadata?.user_id
     const priceId = session.metadata?.price_id
     if (!userId || !priceId) return NextResponse.json({ error: 'Missing metadata' }, { status: 400 })
 
-    const sub = session.subscription as Stripe.Subscription
-    if (!sub || session.payment_status !== 'paid') {
-      return NextResponse.json({ error: 'Payment not completed' }, { status: 400 })
-    }
+    const subId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id
+    if (!subId) return NextResponse.json({ error: 'No subscription found' }, { status: 400 })
+
+    // Fetch subscription separately to get full object
+    const sub = await stripe.subscriptions.retrieve(subId)
 
     const tier = PRICE_TO_TIER[priceId]
-    if (!tier) return NextResponse.json({ error: 'Unknown price' }, { status: 400 })
+    if (!tier) return NextResponse.json({ error: `Unknown price: ${priceId}` }, { status: 400 })
 
-    const periodEnd = new Date((sub as any).current_period_end * 1000).toISOString()
+    // current_period_end is a unix timestamp number
+    const periodEndTs = (sub as any).current_period_end
+    const periodEnd = periodEndTs ? new Date(periodEndTs * 1000).toISOString() : null
 
     await supabase.from('users').update({
       stripe_subscription_id: sub.id,
+      stripe_customer_id: typeof sub.customer === 'string' ? sub.customer : sub.customer.id,
       tier,
       custom_commission_rate: TIER_FEES[tier],
       sub_expires_at: periodEnd,
     }).eq('id', userId)
 
-    return NextResponse.json({ ok: true, tier, sub_id: sub.id })
+    return NextResponse.json({ ok: true, tier, sub_id: sub.id, period_end: periodEnd })
   } catch (err: any) {
+    console.error('Subscribe GET error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
