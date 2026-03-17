@@ -240,6 +240,7 @@ export default function DashboardPage() {
                 { href: '/dashboard/tasks', icon: '📋', label: 'Tasks', sub: 'Manage list' },
                 { href: '/dashboard/sessions', icon: '📊', label: 'Sessions', sub: 'Stats & history' },
                 { href: '/dashboard/payments', icon: '💳', label: 'Payments', sub: 'Stripe' },
+                { href: '/dashboard/qr', icon: '⬛', label: 'QR Code', sub: 'Print & share' },
               ] : [
                 { href: '/dashboard/profile', icon: '💰', label: 'Enable tips', sub: 'Get tipped too' },
               ]),
