@@ -18,6 +18,15 @@ const TIER_FEES: Record<string, number> = {
   elite: 0.08,
 }
 
+function getPeriodEnd(sub: any): string | null {
+  // Try all known locations across Stripe API versions
+  const ts = sub.current_period_end
+    ?? sub.billing_cycle_anchor
+    ?? sub.items?.data?.[0]?.current_period_end
+    ?? null
+  return ts ? new Date(ts * 1000).toISOString() : null
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { user_id, price_id, return_url } = await req.json()
@@ -66,34 +75,36 @@ export async function GET(req: NextRequest) {
     const sessionId = searchParams.get('session_id')
     if (!sessionId) return NextResponse.json({ error: 'Missing session_id' }, { status: 400 })
 
-    // Retrieve session
     const session = await stripe.checkout.sessions.retrieve(sessionId)
     const userId = session.metadata?.user_id
     const priceId = session.metadata?.price_id
     if (!userId || !priceId) return NextResponse.json({ error: 'Missing metadata' }, { status: 400 })
 
-    const subId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id
+    const subId = typeof session.subscription === 'string' ? session.subscription : (session.subscription as any)?.id
     if (!subId) return NextResponse.json({ error: 'No subscription found' }, { status: 400 })
 
-    // Fetch subscription separately to get full object
-    const sub = await stripe.subscriptions.retrieve(subId)
+    // Fetch with all nested data expanded
+    const sub = await stripe.subscriptions.retrieve(subId, {
+      expand: ['items.data.price'],
+    })
 
     const tier = PRICE_TO_TIER[priceId]
     if (!tier) return NextResponse.json({ error: `Unknown price: ${priceId}` }, { status: 400 })
 
-    // current_period_end is a unix timestamp number
-    const periodEndTs = (sub as any).current_period_end
-    const periodEnd = periodEndTs ? new Date(periodEndTs * 1000).toISOString() : null
+    const periodEnd = getPeriodEnd(sub)
+
+    // If still null, set to 30 days from now as fallback
+    const finalPeriodEnd = periodEnd ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
     await supabase.from('users').update({
       stripe_subscription_id: sub.id,
-      stripe_customer_id: typeof sub.customer === 'string' ? sub.customer : sub.customer.id,
+      stripe_customer_id: typeof sub.customer === 'string' ? sub.customer : (sub.customer as any).id,
       tier,
       custom_commission_rate: TIER_FEES[tier],
-      sub_expires_at: periodEnd,
+      sub_expires_at: finalPeriodEnd,
     }).eq('id', userId)
 
-    return NextResponse.json({ ok: true, tier, sub_id: sub.id, period_end: periodEnd })
+    return NextResponse.json({ ok: true, tier, sub_id: sub.id, period_end: finalPeriodEnd })
   } catch (err: any) {
     console.error('Subscribe GET error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
